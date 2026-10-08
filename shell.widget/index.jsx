@@ -2,7 +2,7 @@ import { React, run } from 'uebersicht';
 
 export const refreshFrequency = false;
 
-export const command = 'echo "\x1b[33m~ \x1b[32mInteractive Shell\x1b[0m ready. Type commands below or press Enter."';
+export const command = '';
 
 const POS_KEY = 'shell_widget_position';
 const SIZE_KEY = 'shell_widget_size';
@@ -403,12 +403,20 @@ export const render = (state, dispatch) => {
       const cmd = inputValue.trim();
       if (!cmd) return;
 
+      if (cmd.toLowerCase() === 'clear') {
+        dispatch({ type: 'CLEAR_LINES' });
+        dispatch({ type: 'PUSH_HISTORY', cmd });
+        return;
+      }
+
       // Add command line
       dispatch({ type: 'ADD_LINE', lineType: 'command', text: cmd });
       dispatch({ type: 'PUSH_HISTORY', cmd });
 
-      // Run command natively via Übersicht
-      run(cmd)
+      // Run natively in zsh with complete PATH
+      const fullCmd = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; zsh -l -c ${JSON.stringify(cmd)}`;
+
+      run(fullCmd)
         .then((output) => {
           if (output && output.trim()) {
             dispatch({ type: 'ADD_LINE', lineType: 'output', text: output });
