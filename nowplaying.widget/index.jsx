@@ -204,9 +204,7 @@ export const render = (state, dispatch) => {
           </div>
           <div style={emptyTextGroupStyle}>
             <div style={emptyTitleStyle}>{error ? 'Widget Error' : 'Nothing Playing'}</div>
-            <div style={emptySubtitleStyle}>
-              {error ? error : 'macOS Now Playing'}
-            </div>
+            {error && <div style={emptySubtitleStyle}>{error}</div>}
           </div>
         </div>
       </div>
