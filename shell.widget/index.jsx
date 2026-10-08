@@ -73,6 +73,23 @@ const BG_MAP = {
   '107': ITERM2_THEME.brightWhite,
 };
 
+const COLOR_CUBE_STEPS = [0, 95, 135, 175, 215, 255];
+
+function get256Color(n) {
+  if (isNaN(n) || n < 0 || n > 255) return ITERM2_THEME.fg;
+  if (n < 8) return FG_MAP[String(30 + n)] || ITERM2_THEME.fg;
+  if (n < 16) return FG_MAP[String(90 + (n - 8))] || ITERM2_THEME.brightWhite;
+  if (n < 232) {
+    const idx = n - 16;
+    const r = COLOR_CUBE_STEPS[Math.floor(idx / 36)];
+    const g = COLOR_CUBE_STEPS[Math.floor((idx % 36) / 6)];
+    const b = COLOR_CUBE_STEPS[idx % 6];
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  const gray = 8 + (n - 232) * 10;
+  return `rgb(${gray}, ${gray}, ${gray})`;
+}
+
 const getInitialPosition = () => {
   try {
     const saved = localStorage.getItem(POS_KEY);
@@ -129,25 +146,44 @@ export const initialState = {
   inputValue: '',
   history: [],
   historyIndex: -1,
+  isRunning: false,
 };
 
 export const updateState = (event, previousState) => {
   if (!previousState) return initialState;
 
-  if (event.type === 'UB/COMMAND_RAN') {
-    if (event.error) {
-      return {
-        ...previousState,
-        lines: [...previousState.lines, { type: 'error', text: event.error }],
-      };
-    }
-    if (event.output && event.output.trim()) {
-      return {
-        ...previousState,
-        lines: [...previousState.lines, { type: 'output', text: event.output }],
-      };
-    }
-    return previousState;
+  if (event.type === 'COMMAND_START') {
+    return {
+      ...previousState,
+      isRunning: true,
+      lines: [...previousState.lines, { type: 'command', text: event.cmd }],
+      history: [...previousState.history, event.cmd],
+      historyIndex: -1,
+      inputValue: '',
+    };
+  }
+
+  if (event.type === 'COMMAND_OUTPUT') {
+    return {
+      ...previousState,
+      isRunning: false,
+      lines: [...previousState.lines, { type: event.lineType || 'output', text: event.text }],
+    };
+  }
+
+  if (event.type === 'COMMAND_FINISHED') {
+    return {
+      ...previousState,
+      isRunning: false,
+    };
+  }
+
+  if (event.type === 'CANCEL_COMMAND') {
+    return {
+      ...previousState,
+      isRunning: false,
+      lines: [...previousState.lines, { type: 'command', text: '^C' }],
+    };
   }
 
   if (event.type === 'ADD_LINE') {
@@ -261,14 +297,16 @@ export const updateState = (event, previousState) => {
   return previousState;
 };
 
-// ANSI color parser for rich terminal rendering
+// ANSI color and style parser for rich terminal rendering
 function renderAnsiText(raw) {
   if (!raw) return null;
 
-  // Clean OSC escape sequences and cursor motion
+  // Clean carriage returns, OSC escape sequences, and cursor motion.
+  // Note: Only clean fn cursor codes, never the range f-n which would strip 'm' (color) codes!
   const cleaned = raw
+    .replace(/\r/g, '')
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
-    .replace(/\x1b\[[0-9;]*[A-HJKSTf-n]/g, '')
+    .replace(/\x1b\[[0-9;]*[A-HJKSTfn]/g, '')
     .replace(/\x1b\[\?[0-9;]*[a-zA-Z]/g, '');
 
   const regex = /\x1b\[([0-9;]*)m/g;
@@ -278,6 +316,7 @@ function renderAnsiText(raw) {
   let currentBg = 'transparent';
   let isBold = false;
   let isDim = false;
+  let isUnderline = false;
   let match;
 
   while ((match = regex.exec(cleaned)) !== null) {
@@ -290,6 +329,7 @@ function renderAnsiText(raw) {
             color: currentFg,
             backgroundColor: currentBg,
             fontWeight: isBold ? '700' : '400',
+            textDecoration: isUnderline ? 'underline' : 'none',
             opacity: isDim ? 0.6 : 1,
           }}
         >
@@ -299,19 +339,41 @@ function renderAnsiText(raw) {
     }
 
     const codes = match[1] ? match[1].split(';') : ['0'];
-    for (const code of codes) {
+    for (let i = 0; i < codes.length; i++) {
+      const code = codes[i];
       if (code === '0' || code === '') {
         currentFg = ITERM2_THEME.fg;
         currentBg = 'transparent';
         isBold = false;
         isDim = false;
+        isUnderline = false;
       } else if (code === '1') {
         isBold = true;
       } else if (code === '2') {
         isDim = true;
+      } else if (code === '4') {
+        isUnderline = true;
       } else if (code === '22') {
         isBold = false;
         isDim = false;
+      } else if (code === '24') {
+        isUnderline = false;
+      } else if (code === '39') {
+        currentFg = ITERM2_THEME.fg;
+      } else if (code === '49') {
+        currentBg = 'transparent';
+      } else if (code === '38' && codes[i + 1] === '5' && codes[i + 2] !== undefined) {
+        currentFg = get256Color(parseInt(codes[i + 2], 10));
+        i += 2;
+      } else if (code === '38' && codes[i + 1] === '2' && codes[i + 4] !== undefined) {
+        currentFg = `rgb(${codes[i + 2]}, ${codes[i + 3]}, ${codes[i + 4]})`;
+        i += 4;
+      } else if (code === '48' && codes[i + 1] === '5' && codes[i + 2] !== undefined) {
+        currentBg = get256Color(parseInt(codes[i + 2], 10));
+        i += 2;
+      } else if (code === '48' && codes[i + 1] === '2' && codes[i + 4] !== undefined) {
+        currentBg = `rgb(${codes[i + 2]}, ${codes[i + 3]}, ${codes[i + 4]})`;
+        i += 4;
       } else if (FG_MAP[code]) {
         currentFg = FG_MAP[code];
       } else if (BG_MAP[code]) {
@@ -331,6 +393,7 @@ function renderAnsiText(raw) {
           color: currentFg,
           backgroundColor: currentBg,
           fontWeight: isBold ? '700' : '400',
+          textDecoration: isUnderline ? 'underline' : 'none',
           opacity: isDim ? 0.6 : 1,
         }}
       >
@@ -354,6 +417,7 @@ export const render = (state, dispatch) => {
     inputValue = '',
     history = [],
     historyIndex = -1,
+    isRunning = false,
   } = state || {};
 
   const handleMouseDown = (e) => {
@@ -409,23 +473,84 @@ export const render = (state, dispatch) => {
         return;
       }
 
-      // Add command line
-      dispatch({ type: 'ADD_LINE', lineType: 'command', text: cmd });
-      dispatch({ type: 'PUSH_HISTORY', cmd });
+      // 1. Immediately record command and transition to running state
+      dispatch({ type: 'COMMAND_START', cmd });
 
-      // Run natively in zsh with complete PATH
-      const fullCmd = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; zsh -l -c ${JSON.stringify(cmd)}`;
+      // 2. Continuous / interactive guardrails
+      if (cmd === 'cava' || cmd.startsWith('cava ')) {
+        dispatch({
+          type: 'COMMAND_OUTPUT',
+          lineType: 'output',
+          text: 'cava: continuous interactive TUI audio visualizers cannot run in a desktop widget shell.\n' +
+                'cava requires a continuous bidirectional terminal session and macOS System Audio Recording permission for AudioTap.\n' +
+                'Tip: Run cava directly in your iTerm2 or Terminal.app window.',
+        });
+        return;
+      }
+
+      const firstWord = cmd.split(/\s+/)[0];
+      if (['vim', 'vi', 'nano', 'emacs'].includes(firstWord)) {
+        dispatch({
+          type: 'COMMAND_OUTPUT',
+          lineType: 'error',
+          text: `${firstWord}: interactive editor cannot run in a desktop widget shell.`,
+        });
+        return;
+      }
+
+      if (['less', 'more'].includes(firstWord)) {
+        dispatch({
+          type: 'COMMAND_OUTPUT',
+          lineType: 'error',
+          text: `${firstWord}: pager cannot run interactively. Use 'cat' or pipe to 'head'.`,
+        });
+        return;
+      }
+
+      // 3. Auto-snapshot & bound infinite tools
+      let execCmd = cmd;
+      if (cmd === 'top') {
+        execCmd = 'top -l 1';
+      } else if (/^ping\s+[^-\s]/.test(cmd) && !cmd.includes('-c')) {
+        execCmd = `${cmd} -c 4`;
+      }
+
+      // Execute via PTY (script -q /dev/null) to force authentic TTY colors and formatting
+      const fullCmd = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" CLICOLOR_FORCE=1 FORCE_COLOR=1; script -q /dev/null zsh -l -c ${JSON.stringify(execCmd)}`;
+
+      let hasCompleted = false;
+      const timer = setTimeout(() => {
+        if (!hasCompleted) {
+          hasCompleted = true;
+          dispatch({
+            type: 'COMMAND_OUTPUT',
+            lineType: 'error',
+            text: '[Process timed out after 15s]',
+          });
+        }
+      }, 15000);
 
       run(fullCmd)
         .then((output) => {
+          if (hasCompleted) return;
+          hasCompleted = true;
+          clearTimeout(timer);
           if (output && output.trim()) {
-            dispatch({ type: 'ADD_LINE', lineType: 'output', text: output });
+            dispatch({ type: 'COMMAND_OUTPUT', lineType: 'output', text: output });
+          } else {
+            dispatch({ type: 'COMMAND_FINISHED' });
           }
         })
         .catch((err) => {
+          if (hasCompleted) return;
+          hasCompleted = true;
+          clearTimeout(timer);
           const errMsg = err?.message || String(err);
-          dispatch({ type: 'ADD_LINE', lineType: 'error', text: errMsg });
+          dispatch({ type: 'COMMAND_OUTPUT', lineType: 'error', text: errMsg });
         });
+    } else if (e.key === 'Escape' || (e.ctrlKey && e.key === 'c')) {
+      e.preventDefault();
+      dispatch({ type: 'CANCEL_COMMAND' });
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (history.length > 0) {
@@ -459,7 +584,17 @@ export const render = (state, dispatch) => {
   };
 
   return (
-    <div style={positionStyle} onMouseDown={handleMouseDown}>
+    <div
+      style={positionStyle}
+      onMouseDown={handleMouseDown}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if ((e.key === 'Escape' || (e.ctrlKey && e.key === 'c')) && isRunning) {
+          e.preventDefault();
+          dispatch({ type: 'CANCEL_COMMAND' });
+        }
+      }}
+    >
       <div style={windowStyle}>
         {/* Title Bar */}
         <div style={titleBarStyle}>
@@ -481,12 +616,24 @@ export const render = (state, dispatch) => {
         </div>
 
         {/* Terminal Body */}
-        <div style={terminalBodyStyle} data-no-drag="true">
+        <div
+          ref={(el) => {
+            if (el) {
+              el.scrollTop = el.scrollHeight;
+            }
+          }}
+          style={terminalBodyStyle}
+          data-no-drag="true"
+          onClick={() => {
+            const inputEl = document.getElementById('shell-widget-input');
+            if (inputEl) inputEl.focus();
+          }}
+        >
           {lines.map((line, idx) => (
             <div key={idx} style={lineStyle}>
               {line.type === 'command' ? (
                 <span>
-                  <span style={{ color: ITERM2_THEME.yellow, marginRight: '6px' }}>❯</span>
+                  <span style={{ color: ITERM2_THEME.yellow, marginRight: '6px', fontWeight: '700' }}>❯</span>
                   <span style={{ color: ITERM2_THEME.brightWhite }}>{line.text}</span>
                 </span>
               ) : line.type === 'error' ? (
@@ -497,20 +644,38 @@ export const render = (state, dispatch) => {
             </div>
           ))}
 
-          {/* Interactive Input Prompt */}
-          <div style={promptRowStyle}>
-            <span style={promptSymbolStyle}>❯</span>
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => dispatch({ type: 'SET_INPUT', value: e.target.value })}
-              onKeyDown={handleKeyDown}
-              placeholder="run command..."
-              style={inputStyle}
-              data-no-drag="true"
-              autoFocus={false}
-            />
-          </div>
+          {/* Active Running State or Interactive Prompt */}
+          {isRunning ? (
+            <div style={runningRowStyle}>
+              <span style={runningDotStyle} />
+              <span style={runningTextStyle}>running...</span>
+              <span
+                style={abortButtonStyle}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dispatch({ type: 'CANCEL_COMMAND' });
+                }}
+                title="Cancel command (Ctrl+C / Esc)"
+              >
+                ✕ cancel
+              </span>
+            </div>
+          ) : (
+            <div style={promptRowStyle}>
+              <span style={promptSymbolStyle}>❯</span>
+              <input
+                id="shell-widget-input"
+                type="text"
+                value={inputValue}
+                onChange={(e) => dispatch({ type: 'SET_INPUT', value: e.target.value })}
+                onKeyDown={handleKeyDown}
+                placeholder="run command..."
+                style={inputStyle}
+                data-no-drag="true"
+                autoFocus={true}
+              />
+            </div>
+          )}
         </div>
 
         {/* Resize Handle */}
@@ -534,6 +699,11 @@ export const render = (state, dispatch) => {
 export const className = `
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   color: ${ITERM2_THEME.fg};
+
+  @keyframes shellPulse {
+    0%, 100% { opacity: 0.3; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
 
   input::placeholder {
     color: rgba(252, 232, 195, 0.35);
@@ -638,6 +808,40 @@ const inputStyle = {
   fontSize: '12px',
   color: ITERM2_THEME.fg,
   padding: 0,
+};
+
+const runningRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  marginTop: '6px',
+};
+
+const runningDotStyle = {
+  width: '7px',
+  height: '7px',
+  borderRadius: '50%',
+  backgroundColor: ITERM2_THEME.yellow,
+  display: 'inline-block',
+  animation: 'shellPulse 1.2s infinite ease-in-out',
+};
+
+const runningTextStyle = {
+  fontStyle: 'italic',
+  color: 'rgba(252, 232, 195, 0.65)',
+  fontSize: '11px',
+};
+
+const abortButtonStyle = {
+  cursor: 'pointer',
+  padding: '1px 6px',
+  borderRadius: '4px',
+  backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  color: ITERM2_THEME.fg,
+  fontSize: '10px',
+  opacity: 0.75,
+  userSelect: 'none',
+  WebkitUserSelect: 'none',
 };
 
 const resizeHandleStyle = {
