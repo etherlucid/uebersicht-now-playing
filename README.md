@@ -6,38 +6,36 @@ Minimal, glassmorphic desktop widgets for [Übersicht](https://tracesof.net/uebe
 
 ## 1. `nowplaying.widget`
 
-Displays the currently playing audio on macOS (Spotify, Apple Music, YouTube Music, web browsers, local media players).
+Displays currently playing audio on macOS (Spotify, Apple Music, YouTube Music, web browsers, local media players).
 
 ### Features
-- Shows track title, artist, album, cover art, and progress bar.
-- On-widget playback controls (previous, play/pause, next) with instant 0ms optimistic response.
-- Draggable anywhere on screen with position saved across reboots.
-- Queries macOS MediaRemote directly using `nowplaying-cli`.
+- Track title, artist, album, cover art, and progress bar.
+- On-widget playback controls (previous, play/pause, next) with 0ms optimistic response.
+- Draggable anywhere on screen with position preserved across reboots.
+- Queries macOS MediaRemote directly via `nowplaying-cli`.
 
 ---
 
-## 2. `cava.widget`
+## 2. `shell.widget`
 
-Real-time audio visualizer displaying live frequency spectrum from the [cava](https://github.com/kaskas7/cava) CLI visualizer.
+An interactive, draggable, and resizable desktop shell widget with an inherited **iTerm2 color theme**.
 
 ### Features
-- **GPU-accelerated Canvas**: Smooth 35 FPS audio bars rendered via HTML5 canvas.
-- **Draggable & Resizable**: Drag anywhere on screen or drag the bottom-right corner grip to resize to any width/height.
-- **Persistent Layout**: Position and dimensions saved in `localStorage`.
-- **Low Overhead**: Lightweight background daemon streams frames via Server-Sent Events (SSE) with near-zero CPU usage.
+- **iTerm2 Theme Integration**: Automatically styled with the exact color palette (background, foreground, cursor, and full 16-color ANSI spectrum) from your iTerm2 profile.
+- **Interactive Terminal**: Type any shell command directly into the prompt (`❯`) and hit Enter to execute.
+- **ANSI Color Parsing**: Renders colored terminal outputs (`git`, `ls -G`, `cal`, custom scripts) in rich styled text.
+- **Command History**: Navigate previous commands using Up/Down arrow keys.
+- **Draggable & Resizable**: Drag by the titlebar or window, and resize using the bottom-right grip. Position and size are preserved in `localStorage`.
+- **Zero Background Daemons**: Runs 100% inside Übersicht's standard native environment—no open ports, no listening sockets, fully enterprise EDR compliant.
 
 ---
 
 ## Requirements
 
 - [Übersicht](https://tracesof.net/uebersicht/)
-- [nowplaying-cli](https://github.com/kirtan-shah/nowplaying-cli):
+- [nowplaying-cli](https://github.com/kirtan-shah/nowplaying-cli) (for `nowplaying.widget`):
   ```bash
   brew install nowplaying-cli
-  ```
-- [cava](https://github.com/kaskas7/cava):
-  ```bash
-  brew install cava
   ```
 
 ---
@@ -49,12 +47,12 @@ Copy or symlink the widgets into your Übersicht widgets directory:
 ```bash
 git clone https://github.com/etherlucid/uebersicht-now-playing.git
 cp -r uebersicht-now-playing/nowplaying.widget "$HOME/Library/Application Support/Übersicht/widgets/"
-cp -r uebersicht-now-playing/cava.widget "$HOME/Library/Application Support/Übersicht/widgets/"
+cp -r uebersicht-now-playing/shell.widget "$HOME/Library/Application Support/Übersicht/widgets/"
 ```
 
 Or symlink:
 
 ```bash
 ln -s "$(pwd)/nowplaying.widget" "$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget"
-ln -s "$(pwd)/cava.widget" "$HOME/Library/Application Support/Übersicht/widgets/cava.widget"
+ln -s "$(pwd)/shell.widget" "$HOME/Library/Application Support/Übersicht/widgets/shell.widget"
 ```
