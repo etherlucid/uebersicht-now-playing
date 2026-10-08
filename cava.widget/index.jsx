@@ -1,4 +1,5 @@
 import { React } from 'uebersicht';
+import { theme, settings } from './config.js';
 
 export const refreshFrequency = 60; // Poll bridge every 60ms (~16 FPS)
 
@@ -7,20 +8,7 @@ export const command = `python3 "$HOME/Library/Application Support/Übersicht/wi
 const POS_KEY = 'cava_widget_position';
 const SIZE_KEY = 'cava_widget_size';
 const SCREEN_MARGIN = 2;
-const DEFAULT_BARS_COUNT = 28;
-
-// Exact color palette extracted from user's iTerm2 profile and ~/.config/cava/config
-const ITERM2_THEME = {
-  bg: 'rgba(28, 27, 25, 0.90)',
-  cardBorder: 'rgba(255, 255, 255, 0.12)',
-  fg: '#fce8c3',
-  title: 'rgba(252, 232, 195, 0.70)',
-  subtitle: 'rgba(252, 232, 195, 0.40)',
-  // Vertical gradient matching ~/.config/cava/config gradient
-  gradBase: '#59cc33',
-  gradMid: '#cccc33',
-  gradPeak: '#cc3333',
-};
+const DEFAULT_BARS_COUNT = settings.barsCount || 28;
 
 const getInitialPosition = () => {
   try {
@@ -241,8 +229,8 @@ export const render = (state, dispatch) => {
     boxSizing: 'border-box',
   };
 
-  // Determine active display bars count based on current window width
   const barsData = bars.length > 0 ? bars : new Array(DEFAULT_BARS_COUNT).fill(0);
+  const minHeight = settings.minBarHeightPct || 2;
 
   return (
     <div style={positionStyle} onMouseDown={handleMouseDown}>
@@ -254,7 +242,7 @@ export const render = (state, dispatch) => {
             <span style={{ ...dotStyle, backgroundColor: '#ffbd2e' }} />
             <span style={{ ...dotStyle, backgroundColor: '#27c93f' }} />
           </div>
-          <div style={titleTextStyle}>cava</div>
+          <div style={titleTextStyle}>{settings.title || 'cava'}</div>
           <div style={statusLabelStyle}>tap</div>
         </div>
 
@@ -262,8 +250,7 @@ export const render = (state, dispatch) => {
         <div style={terminalBodyStyle} data-no-drag="true">
           <div style={barsContainerStyle}>
             {barsData.map((val, idx) => {
-              // Percentage height (min 2% so idle head remains visible as in cava)
-              const heightPct = Math.max(2, val);
+              const heightPct = Math.max(minHeight, val);
               return (
                 <div key={idx} style={barColumnStyle}>
                   <div
@@ -298,19 +285,22 @@ export const render = (state, dispatch) => {
 
 export const className = `
   font-family: -apple-system, BlinkMacSystemFont, "SF Mono", Menlo, Monaco, Consolas, monospace;
-  color: ${ITERM2_THEME.fg};
 `;
+
+const gradientCss = (theme.gradient && theme.gradient.length > 0)
+  ? `linear-gradient(to top, ${theme.gradient.join(', ')})`
+  : 'linear-gradient(to top, #59cc33, #cccc33, #cc3333)';
 
 const windowStyle = {
   position: 'relative',
   width: '100%',
   height: '100%',
-  backgroundColor: ITERM2_THEME.bg,
+  backgroundColor: theme.bg,
   backdropFilter: 'blur(28px) saturate(180%)',
   WebkitBackdropFilter: 'blur(28px) saturate(180%)',
   borderRadius: '16px',
   boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3)',
-  border: `1px solid ${ITERM2_THEME.cardBorder}`,
+  border: `1px solid ${theme.cardBorder}`,
   boxSizing: 'border-box',
   overflow: 'hidden',
   display: 'flex',
@@ -345,13 +335,13 @@ const dotStyle = {
 const titleTextStyle = {
   fontSize: '11px',
   fontWeight: '600',
-  color: ITERM2_THEME.title,
+  color: theme.titleColor,
   letterSpacing: '0.2px',
 };
 
 const statusLabelStyle = {
   fontSize: '10px',
-  color: ITERM2_THEME.subtitle,
+  color: theme.statusColor,
   width: '48px',
   textAlign: 'right',
   fontFamily: '"SF Mono", Menlo, monospace',
@@ -373,7 +363,7 @@ const barsContainerStyle = {
   display: 'flex',
   alignItems: 'flex-end',
   justifyContent: 'space-between',
-  gap: '3px',
+  gap: `${settings.barGap || 3}px`,
 };
 
 const barColumnStyle = {
@@ -387,18 +377,10 @@ const barColumnStyle = {
 
 const barFillStyle = {
   width: '100%',
-  // Terminal 8-stop gradient matching ~/.config/cava/config
-  background: `linear-gradient(to top, 
-    ${ITERM2_THEME.gradBase} 0%, 
-    #80cc33 25%, 
-    ${ITERM2_THEME.gradMid} 55%, 
-    #cc8033 80%, 
-    ${ITERM2_THEME.gradPeak} 100%
-  )`,
-  // Sharp terminal block corners with subtle notch segmentation
+  background: gradientCss,
   borderRadius: '1px 1px 0 0',
   transition: 'height 0.055s ease-out',
-  boxShadow: '0 0 6px rgba(89, 204, 51, 0.25)',
+  boxShadow: `0 0 6px ${theme.barGlow || 'rgba(89, 204, 51, 0.25)'}`,
 };
 
 const resizeHandleStyle = {

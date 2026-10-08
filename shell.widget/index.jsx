@@ -1,4 +1,5 @@
 import { React, run } from 'uebersicht';
+import { theme as ITERM2_THEME, settings } from './config.js';
 
 export const refreshFrequency = false;
 
@@ -7,31 +8,6 @@ export const command = '';
 const POS_KEY = 'shell_widget_position';
 const SIZE_KEY = 'shell_widget_size';
 const SCREEN_MARGIN = 2;
-
-// Exact color palette extracted from user's iTerm2 profile
-const ITERM2_THEME = {
-  bg: 'rgba(28, 27, 25, 0.90)',
-  cardBorder: 'rgba(255, 255, 255, 0.12)',
-  fg: '#fce8c3',
-  cursor: '#fbb829',
-  selection: '#fce8c3',
-  black: '#1c1b19',
-  red: '#ef2f27',
-  green: '#519f50',
-  yellow: '#fbb829',
-  blue: '#2c78bf',
-  magenta: '#e02c6d',
-  cyan: '#0aaeb3',
-  white: '#baa67f',
-  brightBlack: '#918175',
-  brightRed: '#f75341',
-  brightGreen: '#98bc37',
-  brightYellow: '#fed06e',
-  brightBlue: '#68a8e4',
-  brightMagenta: '#ff5c8f',
-  brightCyan: '#2be4d0',
-  brightWhite: '#fce8c3',
-};
 
 const FG_MAP = {
   '30': ITERM2_THEME.black,
@@ -301,8 +277,6 @@ export const updateState = (event, previousState) => {
 function renderAnsiText(raw) {
   if (!raw) return null;
 
-  // Clean carriage returns, OSC escape sequences, and cursor motion.
-  // Note: Only clean fn cursor codes, never the range f-n which would strip 'm' (color) codes!
   const cleaned = raw
     .replace(/\r/g, '')
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
@@ -483,7 +457,7 @@ export const render = (state, dispatch) => {
           lineType: 'output',
           text: 'cava: continuous interactive TUI audio visualizers cannot run in a desktop widget shell.\n' +
                 'cava requires a continuous bidirectional terminal session and macOS System Audio Recording permission for AudioTap.\n' +
-                'Tip: Run cava directly in your iTerm2 or Terminal.app window.',
+                'Tip: Use the dedicated cava.widget on your desktop for real-time visualization.',
         });
         return;
       }
@@ -518,6 +492,7 @@ export const render = (state, dispatch) => {
       // Execute via PTY (script -q /dev/null) to force authentic TTY colors and formatting
       const fullCmd = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" CLICOLOR_FORCE=1 FORCE_COLOR=1; script -q /dev/null zsh -l -c ${JSON.stringify(execCmd)}`;
 
+      const timeoutMs = (settings.timeoutSeconds || 15) * 1000;
       let hasCompleted = false;
       const timer = setTimeout(() => {
         if (!hasCompleted) {
@@ -525,10 +500,10 @@ export const render = (state, dispatch) => {
           dispatch({
             type: 'COMMAND_OUTPUT',
             lineType: 'error',
-            text: '[Process timed out after 15s]',
+            text: `[Process timed out after ${settings.timeoutSeconds || 15}s]`,
           });
         }
-      }, 15000);
+      }, timeoutMs);
 
       run(fullCmd)
         .then((output) => {
@@ -583,6 +558,10 @@ export const render = (state, dispatch) => {
     boxSizing: 'border-box',
   };
 
+  const promptSymbol = settings.promptSymbol || '❯';
+  const promptPlaceholder = settings.placeholder || 'run command...';
+  const windowTitle = settings.title || 'zsh';
+
   return (
     <div
       style={positionStyle}
@@ -611,7 +590,7 @@ export const render = (state, dispatch) => {
             <span style={{ ...dotStyle, backgroundColor: '#ffbd2e' }} />
             <span style={{ ...dotStyle, backgroundColor: '#27c93f' }} />
           </div>
-          <div style={titleTextStyle}>zsh</div>
+          <div style={titleTextStyle}>{windowTitle}</div>
           <div style={{ width: '48px' }} />
         </div>
 
@@ -633,7 +612,7 @@ export const render = (state, dispatch) => {
             <div key={idx} style={lineStyle}>
               {line.type === 'command' ? (
                 <span>
-                  <span style={{ color: ITERM2_THEME.yellow, marginRight: '6px', fontWeight: '700' }}>❯</span>
+                  <span style={{ color: ITERM2_THEME.yellow, marginRight: '6px', fontWeight: '700' }}>{promptSymbol}</span>
                   <span style={{ color: ITERM2_THEME.brightWhite }}>{line.text}</span>
                 </span>
               ) : line.type === 'error' ? (
@@ -662,14 +641,14 @@ export const render = (state, dispatch) => {
             </div>
           ) : (
             <div style={promptRowStyle}>
-              <span style={promptSymbolStyle}>❯</span>
+              <span style={promptSymbolStyle}>{promptSymbol}</span>
               <input
                 id="shell-widget-input"
                 type="text"
                 value={inputValue}
                 onChange={(e) => dispatch({ type: 'SET_INPUT', value: e.target.value })}
                 onKeyDown={handleKeyDown}
-                placeholder="run command..."
+                placeholder={promptPlaceholder}
                 style={inputStyle}
                 data-no-drag="true"
                 autoFocus={true}
