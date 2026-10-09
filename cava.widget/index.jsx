@@ -252,9 +252,8 @@ export const render = (state, dispatch) => {
   const barsData = bars.length > 0 ? bars : new Array(DEFAULT_BARS_COUNT).fill(0);
   const minHeight = typeof settings.minBarHeightPct === 'number' ? settings.minBarHeightPct : 2;
   const gradientCss = getGradientCss(theme.gradient, settings.gradientMode);
-  const barRadius = typeof settings.barCornerRadius === 'number' ? `${settings.barCornerRadius}px ${settings.barCornerRadius}px 0 0` : '0px';
-  const barShadow = settings.enableGlow ? (theme.barGlow || '0 0 6px rgba(89, 204, 51, 0.25)') : 'none';
   const gapPx = settings.barGap !== undefined ? settings.barGap : 3;
+  const radiusPx = settings.barCornerRadius || 0;
 
   return (
     <div style={positionStyle} onMouseDown={handleMouseDown}>
@@ -272,20 +271,29 @@ export const render = (state, dispatch) => {
           </div>
         )}
 
-        {/* Terminal Visualizer Body */}
+        {/* Terminal Visualizer Body with Fixed Vertical Color Regions */}
         <div style={terminalBodyStyle}>
           <div style={{ ...barsContainerStyle, gap: `${gapPx}px` }}>
             {barsData.map((val, idx) => {
-              const heightPct = Math.max(minHeight, val);
+              // Calculate clipped percentage from top:
+              // Fixed gradient spans 100% of height. When bar rises, it reveals higher color regions.
+              const heightPct = Math.max(minHeight, Math.min(100, val));
+              const clipTop = (100 - heightPct).toFixed(2);
+              const clipStyle = radiusPx > 0
+                ? `inset(${clipTop}% 0 0 0 round ${radiusPx}px ${radiusPx}px 0 0)`
+                : `inset(${clipTop}% 0 0 0)`;
+
               return (
                 <div key={idx} style={barColumnStyle}>
                   <div
                     style={{
                       ...barFillStyle,
-                      height: `${heightPct}%`,
                       background: gradientCss,
-                      borderRadius: barRadius,
-                      boxShadow: barShadow,
+                      clipPath: clipStyle,
+                      WebkitClipPath: clipStyle,
+                      filter: settings.enableGlow
+                        ? `drop-shadow(0 0 4px ${theme.gradient[0] || '#59cc33'})`
+                        : 'none',
                     }}
                   />
                 </div>
@@ -386,22 +394,20 @@ const barsContainerStyle = {
   width: '100%',
   height: '100%',
   display: 'flex',
-  alignItems: 'flex-end',
+  alignItems: 'stretch',
   justifyContent: 'space-between',
 };
 
 const barColumnStyle = {
   flex: 1,
   height: '100%',
-  display: 'flex',
-  alignItems: 'flex-end',
-  justifyContent: 'center',
   minWidth: '2px',
 };
 
 const barFillStyle = {
   width: '100%',
-  transition: 'height 0.055s ease-out',
+  height: '100%',
+  transition: 'clip-path 0.055s ease-out, -webkit-clip-path 0.055s ease-out',
 };
 
 const resizeHandleStyle = {
