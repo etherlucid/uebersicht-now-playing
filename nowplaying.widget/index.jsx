@@ -1,6 +1,6 @@
 import { React, run } from 'uebersicht';
 
-export const refreshFrequency = 1500;
+export const refreshFrequency = 1000;
 
 export const command = `python3 "$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/get_song.py" 2>/dev/null || python3 "nowplaying.widget/get_song.py" 2>/dev/null || python3 "ytmusic.widget/get_song.py"`;
 
@@ -50,6 +50,7 @@ export const updateState = (event, previousState) => {
     }
     try {
       const parsed = JSON.parse(event.output || '{}');
+      parsed.clientReceivedAt = Date.now();
       return {
         ...previousState,
         data: parsed,
@@ -67,12 +68,44 @@ export const updateState = (event, previousState) => {
     if (!previousState.data || !previousState.data.playing) return previousState;
     const currentRate = previousState.data.rate ?? 1;
     const nextRate = currentRate === 1 ? 0 : 1;
+    let nextElapsed = previousState.data.elapsed || 0;
+    if (nextRate === 0) {
+      const delta = (Date.now() - (previousState.data.clientReceivedAt || Date.now())) / 1000;
+      nextElapsed = Math.min(
+        previousState.data.duration || 0,
+        nextElapsed + Math.max(0, delta)
+      );
+    }
     return {
       ...previousState,
       data: {
         ...previousState.data,
         rate: nextRate,
+        elapsed: nextElapsed,
+        clientReceivedAt: Date.now(),
       },
+    };
+  }
+
+  if (event.type === 'TRACK_CHANGE_PENDING') {
+    if (!previousState.data || !previousState.data.playing) return previousState;
+    return {
+      ...previousState,
+      data: {
+        ...previousState.data,
+        elapsed: 0,
+        clientReceivedAt: Date.now(),
+      },
+    };
+  }
+
+  if (event.type === 'TICK') {
+    if (!previousState.data || !previousState.data.playing || previousState.data.rate === 0) {
+      return previousState;
+    }
+    return {
+      ...previousState,
+      tick: event.now,
     };
   }
 
@@ -129,7 +162,18 @@ const formatTime = (secs) => {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 };
 
+let currentDispatch = null;
+if (typeof window !== 'undefined' && !window.__nowplaying_ticker_started) {
+  window.__nowplaying_ticker_started = true;
+  setInterval(() => {
+    if (currentDispatch) {
+      currentDispatch({ type: 'TICK', now: Date.now() });
+    }
+  }, 500);
+}
+
 export const render = (state, dispatch) => {
+  currentDispatch = dispatch;
   const { data, error, x = 50, y = 50, isDragging } = state || {};
 
   const handleMouseDown = (e) => {
@@ -167,6 +211,8 @@ export const render = (state, dispatch) => {
     e.stopPropagation();
     if (action === 'togglePlayPause') {
       dispatch({ type: 'OPTIMISTIC_TOGGLE_PLAY' });
+    } else if (action === 'next' || action === 'previous') {
+      dispatch({ type: 'TRACK_CHANGE_PENDING' });
     }
     const cli = '/opt/homebrew/bin/nowplaying-cli';
     run(`${cli} ${action} 2>/dev/null || nowplaying-cli ${action}`);
@@ -176,7 +222,11 @@ export const render = (state, dispatch) => {
   const isPaused = isPlaying && data.rate === 0;
 
   const duration = data?.duration || 0;
-  const elapsed = data?.elapsed || 0;
+  const baseElapsed = data?.elapsed || 0;
+  const timeSinceUpdate = (Date.now() - (data?.clientReceivedAt || Date.now())) / 1000;
+  const elapsed = (isPlaying && !isPaused && duration > 0)
+    ? Math.min(duration, baseElapsed + Math.max(0, timeSinceUpdate))
+    : baseElapsed;
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (elapsed / duration) * 100)) : 0;
 
   const positionStyle = {

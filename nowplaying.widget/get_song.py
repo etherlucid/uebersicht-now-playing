@@ -5,9 +5,11 @@ import json
 import base64
 import subprocess
 import shutil
+import time
 
 CACHE_TRACK_FILE = "/tmp/nowplaying_track.txt"
 CACHE_ART_FILE = "/tmp/nowplaying_art_data.txt"
+CACHE_STATE_FILE = "/tmp/nowplaying_state.json"
 
 def find_nowplaying_cli():
     paths = [
@@ -120,14 +122,122 @@ def get_app_name(bundle_id):
         return "VLC"
     return "macOS Audio"
 
+def calculate_progress(track_key, raw_elapsed, duration, playback_rate):
+    now = time.time()
+    state = {}
+    if os.path.exists(CACHE_STATE_FILE):
+        try:
+            with open(CACHE_STATE_FILE, "r") as f:
+                state = json.load(f)
+        except Exception:
+            state = {}
+
+    saved_track = state.get("track_id", "")
+    saved_anchor_elapsed = float(state.get("anchor_elapsed", 0.0))
+    saved_anchor_time = float(state.get("anchor_time", now))
+    saved_raw_elapsed = float(state.get("last_raw_elapsed", 0.0))
+    saved_rate = int(state.get("last_rate", 1))
+    last_updated = float(state.get("last_updated", now))
+
+    is_new_track = (track_key != saved_track)
+
+    if is_new_track:
+        anchor_elapsed = raw_elapsed
+        anchor_time = now
+        last_raw_elapsed = raw_elapsed
+        current_elapsed = anchor_elapsed
+    else:
+        gap = now - last_updated
+        if gap > 30.0:
+            if abs(raw_elapsed - saved_raw_elapsed) > 0.05:
+                anchor_elapsed = raw_elapsed
+                anchor_time = now
+                last_raw_elapsed = raw_elapsed
+                current_elapsed = raw_elapsed
+            else:
+                anchor_elapsed = saved_anchor_elapsed
+                anchor_time = now
+                last_raw_elapsed = raw_elapsed
+                current_elapsed = saved_anchor_elapsed
+        elif playback_rate == 0:
+            if saved_rate == 1:
+                elapsed_so_far = saved_anchor_elapsed + max(0.0, now - saved_anchor_time)
+                current_elapsed = elapsed_so_far
+                anchor_elapsed = elapsed_so_far
+                anchor_time = now
+                last_raw_elapsed = raw_elapsed
+            else:
+                if abs(raw_elapsed - saved_raw_elapsed) > 0.5:
+                    anchor_elapsed = raw_elapsed
+                    anchor_time = now
+                    last_raw_elapsed = raw_elapsed
+                    current_elapsed = raw_elapsed
+                else:
+                    current_elapsed = saved_anchor_elapsed
+                    anchor_elapsed = saved_anchor_elapsed
+                    anchor_time = now
+                    last_raw_elapsed = raw_elapsed
+        else: # playback_rate == 1
+            if saved_rate == 0:
+                if abs(raw_elapsed - saved_raw_elapsed) > 0.5:
+                    anchor_elapsed = raw_elapsed
+                else:
+                    anchor_elapsed = saved_anchor_elapsed
+                anchor_time = now
+                last_raw_elapsed = raw_elapsed
+                current_elapsed = anchor_elapsed
+            else:
+                calculated_elapsed = saved_anchor_elapsed + max(0.0, now - saved_anchor_time)
+                if abs(raw_elapsed - saved_raw_elapsed) > 0.05:
+                    anchor_elapsed = raw_elapsed
+                    anchor_time = now
+                    last_raw_elapsed = raw_elapsed
+                    current_elapsed = raw_elapsed
+                else:
+                    current_elapsed = calculated_elapsed
+                    anchor_elapsed = saved_anchor_elapsed
+                    anchor_time = saved_anchor_time
+                    last_raw_elapsed = saved_raw_elapsed
+
+    if duration > 0:
+        current_elapsed = min(duration, max(0.0, current_elapsed))
+    else:
+        current_elapsed = max(0.0, current_elapsed)
+
+    new_state = {
+        "track_id": track_key,
+        "anchor_elapsed": anchor_elapsed,
+        "anchor_time": anchor_time,
+        "last_raw_elapsed": last_raw_elapsed,
+        "last_rate": playback_rate,
+        "last_updated": now
+    }
+    try:
+        with open(CACHE_STATE_FILE, "w") as f:
+            json.dump(new_state, f)
+    except Exception:
+        pass
+
+    return current_elapsed
+
 def main():
     data = get_nowplaying_data()
     if not data:
+        if os.path.exists(CACHE_STATE_FILE):
+            try:
+                os.remove(CACHE_STATE_FILE)
+            except Exception:
+                pass
         print(json.dumps({"playing": False}))
         return
 
     title = data.get("kMRMediaRemoteNowPlayingInfoTitle") or ""
     if not title or title == "null":
+        if os.path.exists(CACHE_STATE_FILE):
+            try:
+                os.remove(CACHE_STATE_FILE)
+            except Exception:
+                pass
         print(json.dumps({"playing": False}))
         return
 
@@ -140,13 +250,17 @@ def main():
         album = ""
 
     duration = float(data.get("kMRMediaRemoteNowPlayingInfoDuration") or 0)
-    elapsed = float(data.get("kMRMediaRemoteNowPlayingInfoElapsedTime") or 0)
+    raw_elapsed = float(data.get("kMRMediaRemoteNowPlayingInfoElapsedTime") or 0)
     playback_rate = int(data.get("kMRMediaRemoteNowPlayingInfoPlaybackRate") or 0)
     bundle_id = data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or ""
+    uid = data.get("kMRMediaRemoteNowPlayingInfoUniqueIdentifier") or ""
 
-    track_key = f"{title}___{artist}___{album}"
-    artwork_url = process_artwork(data, track_key)
+    art_track_key = f"{title}___{artist}___{album}"
+    progress_track_key = f"{uid}___{title}___{artist}___{round(duration, 1)}"
+
+    artwork_url = process_artwork(data, art_track_key)
     app_name = get_app_name(bundle_id)
+    current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
 
     result = {
         "playing": True,
@@ -154,11 +268,12 @@ def main():
         "artist": artist,
         "album": album,
         "duration": round(duration, 1),
-        "elapsed": round(elapsed, 1),
+        "elapsed": round(current_elapsed, 1),
         "rate": playback_rate,
         "artwork": artwork_url,
         "bundleId": bundle_id,
-        "appName": app_name
+        "appName": app_name,
+        "updatedAt": round(time.time(), 3)
     }
     print(json.dumps(result))
 
