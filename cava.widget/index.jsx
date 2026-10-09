@@ -1,5 +1,5 @@
 import { React } from 'uebersicht';
-import { theme, settings } from './config.js';
+import { theme, settings } from './lib/config.js';
 
 export const refreshFrequency = 60; // Poll bridge every 60ms (~16 FPS)
 

@@ -1,5 +1,5 @@
 import { React, run } from 'uebersicht';
-import { theme as ITERM2_THEME, settings } from './config.js';
+import { theme as ITERM2_THEME, settings } from './lib/config.js';
 
 export const refreshFrequency = false;
 
