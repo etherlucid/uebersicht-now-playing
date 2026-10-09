@@ -10,6 +10,26 @@ const SIZE_KEY = 'cava_widget_size';
 const SCREEN_MARGIN = 2;
 const DEFAULT_BARS_COUNT = settings.barsCount || 28;
 
+function getGradientCss(colors, mode) {
+  if (!colors || colors.length === 0) return '#59cc33';
+  if (colors.length === 1) return colors[0];
+
+  if (mode === 'banded') {
+    const n = colors.length;
+    const step = 100 / n;
+    const stops = [];
+    for (let i = 0; i < n; i++) {
+      const start = (i * step).toFixed(2);
+      const end = ((i + 1) * step).toFixed(2);
+      stops.push(`${colors[i]} ${start}%`, `${colors[i]} ${end}%`);
+    }
+    return `linear-gradient(to top, ${stops.join(', ')})`;
+  }
+
+  // Smooth gradient
+  return `linear-gradient(to top, ${colors.join(', ')})`;
+}
+
 const getInitialPosition = () => {
   try {
     const saved = localStorage.getItem(POS_KEY);
@@ -17,7 +37,7 @@ const getInitialPosition = () => {
       const parsed = JSON.parse(saved);
       if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
         const maxX = Math.max(SCREEN_MARGIN, (window.innerWidth || 1920) - 380);
-        const maxY = Math.max(SCREEN_MARGIN, (window.innerHeight || 1080) - 160);
+        const maxY = Math.max(SCREEN_MARGIN, (window.innerHeight || 1080) - 140);
         return {
           x: Math.max(SCREEN_MARGIN, Math.min(maxX, parsed.x)),
           y: Math.max(SCREEN_MARGIN, Math.min(maxY, parsed.y)),
@@ -35,13 +55,13 @@ const getInitialSize = () => {
       const parsed = JSON.parse(saved);
       if (typeof parsed.w === 'number' && typeof parsed.h === 'number') {
         return {
-          w: Math.max(200, Math.min((window.innerWidth || 1920) - 20, parsed.w)),
-          h: Math.max(90, Math.min((window.innerHeight || 1080) - 20, parsed.h)),
+          w: Math.max(180, Math.min((window.innerWidth || 1920) - 20, parsed.w)),
+          h: Math.max(70, Math.min((window.innerHeight || 1080) - 20, parsed.h)),
         };
       }
     }
   } catch (e) {}
-  return { w: 380, h: 160 };
+  return { w: 380, h: 140 };
 };
 
 const initialPos = getInitialPosition();
@@ -136,11 +156,11 @@ export const updateState = (event, previousState) => {
     const deltaW = event.clientX - previousState.resizeStartX;
     const deltaH = event.clientY - previousState.resizeStartY;
 
-    const maxW = Math.max(200, window.innerWidth - previousState.x - SCREEN_MARGIN);
-    const maxH = Math.max(90, window.innerHeight - previousState.y - SCREEN_MARGIN);
+    const maxW = Math.max(180, window.innerWidth - previousState.x - SCREEN_MARGIN);
+    const maxH = Math.max(70, window.innerHeight - previousState.y - SCREEN_MARGIN);
 
-    const newW = Math.max(200, Math.min(maxW, previousState.startW + deltaW));
-    const newH = Math.max(90, Math.min(maxH, previousState.startH + deltaH));
+    const newW = Math.max(180, Math.min(maxW, previousState.startW + deltaW));
+    const newH = Math.max(70, Math.min(maxH, previousState.startH + deltaH));
 
     try {
       localStorage.setItem(SIZE_KEY, JSON.stringify({ w: newW, h: newH }));
@@ -168,7 +188,7 @@ export const render = (state, dispatch) => {
     x = 50,
     y = 380,
     w = 380,
-    h = 160,
+    h = 140,
     isDragging,
     isResizing,
     bars = [],
@@ -230,25 +250,31 @@ export const render = (state, dispatch) => {
   };
 
   const barsData = bars.length > 0 ? bars : new Array(DEFAULT_BARS_COUNT).fill(0);
-  const minHeight = settings.minBarHeightPct || 2;
+  const minHeight = typeof settings.minBarHeightPct === 'number' ? settings.minBarHeightPct : 2;
+  const gradientCss = getGradientCss(theme.gradient, settings.gradientMode);
+  const barRadius = typeof settings.barCornerRadius === 'number' ? `${settings.barCornerRadius}px ${settings.barCornerRadius}px 0 0` : '0px';
+  const barShadow = settings.enableGlow ? (theme.barGlow || '0 0 6px rgba(89, 204, 51, 0.25)') : 'none';
+  const gapPx = settings.barGap !== undefined ? settings.barGap : 3;
 
   return (
     <div style={positionStyle} onMouseDown={handleMouseDown}>
       <div style={windowStyle}>
-        {/* Title Bar */}
-        <div style={titleBarStyle}>
-          <div style={trafficLightsStyle}>
-            <span style={{ ...dotStyle, backgroundColor: '#ff5f56' }} />
-            <span style={{ ...dotStyle, backgroundColor: '#ffbd2e' }} />
-            <span style={{ ...dotStyle, backgroundColor: '#27c93f' }} />
+        {/* Optional Title Bar (hidden by default) */}
+        {settings.showTitleBar && (
+          <div style={titleBarStyle}>
+            <div style={trafficLightsStyle}>
+              <span style={{ ...dotStyle, backgroundColor: '#ff5f56' }} />
+              <span style={{ ...dotStyle, backgroundColor: '#ffbd2e' }} />
+              <span style={{ ...dotStyle, backgroundColor: '#27c93f' }} />
+            </div>
+            <div style={titleTextStyle}>{settings.title || 'cava'}</div>
+            <div style={statusLabelStyle}>tap</div>
           </div>
-          <div style={titleTextStyle}>{settings.title || 'cava'}</div>
-          <div style={statusLabelStyle}>tap</div>
-        </div>
+        )}
 
         {/* Terminal Visualizer Body */}
-        <div style={terminalBodyStyle} data-no-drag="true">
-          <div style={barsContainerStyle}>
+        <div style={terminalBodyStyle}>
+          <div style={{ ...barsContainerStyle, gap: `${gapPx}px` }}>
             {barsData.map((val, idx) => {
               const heightPct = Math.max(minHeight, val);
               return (
@@ -257,6 +283,9 @@ export const render = (state, dispatch) => {
                     style={{
                       ...barFillStyle,
                       height: `${heightPct}%`,
+                      background: gradientCss,
+                      borderRadius: barRadius,
+                      boxShadow: barShadow,
                     }}
                   />
                 </div>
@@ -286,10 +315,6 @@ export const render = (state, dispatch) => {
 export const className = `
   font-family: -apple-system, BlinkMacSystemFont, "SF Mono", Menlo, Monaco, Consolas, monospace;
 `;
-
-const gradientCss = (theme.gradient && theme.gradient.length > 0)
-  ? `linear-gradient(to top, ${theme.gradient.join(', ')})`
-  : 'linear-gradient(to top, #59cc33, #cccc33, #cc3333)';
 
 const windowStyle = {
   position: 'relative',
@@ -335,13 +360,13 @@ const dotStyle = {
 const titleTextStyle = {
   fontSize: '11px',
   fontWeight: '600',
-  color: theme.titleColor,
+  color: 'rgba(252, 232, 195, 0.70)',
   letterSpacing: '0.2px',
 };
 
 const statusLabelStyle = {
   fontSize: '10px',
-  color: theme.statusColor,
+  color: 'rgba(252, 232, 195, 0.40)',
   width: '48px',
   textAlign: 'right',
   fontFamily: '"SF Mono", Menlo, monospace',
@@ -349,7 +374,7 @@ const statusLabelStyle = {
 
 const terminalBodyStyle = {
   flex: 1,
-  padding: '12px 14px 10px',
+  padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
   justifyContent: 'flex-end',
@@ -363,7 +388,6 @@ const barsContainerStyle = {
   display: 'flex',
   alignItems: 'flex-end',
   justifyContent: 'space-between',
-  gap: `${settings.barGap || 3}px`,
 };
 
 const barColumnStyle = {
@@ -377,10 +401,7 @@ const barColumnStyle = {
 
 const barFillStyle = {
   width: '100%',
-  background: gradientCss,
-  borderRadius: '1px 1px 0 0',
   transition: 'height 0.055s ease-out',
-  boxShadow: `0 0 6px ${theme.barGlow || 'rgba(89, 204, 51, 0.25)'}`,
 };
 
 const resizeHandleStyle = {
