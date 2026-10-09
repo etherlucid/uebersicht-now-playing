@@ -6,7 +6,7 @@ export const theme = {
   bg: 'rgba(28, 27, 25, 0.90)',
   cardBorder: 'rgba(255, 255, 255, 0.12)',
 
-  // Vertical frequency bar gradient (matching ~/.config/cava/config)
+  // Color gradient stops (matching ~/.config/cava/config)
   // Ordered from bottom (low amplitude) to top (peak amplitude)
   gradient: [
     '#59cc33', // 1: Green base
@@ -27,8 +27,12 @@ export const settings = {
   // Title bar
   showTitleBar: false, // Set to true to restore the window titlebar
 
-  // Gradient style: 'banded' for sharp discrete terminal color steps, 'smooth' for continuous blend
+  // Gradient style: 'banded' for sharp discrete terminal row steps, 'smooth' for continuous blend
   gradientMode: 'banded',
+
+  // Number of discrete horizontal color bands (terminal character lines)
+  // In terminal CAVA, the gradient stops are interpolated row-by-row across the terminal height.
+  bandCount: 24,
 
   // Glow effect: set to true to enable outer glow around bars
   enableGlow: false,

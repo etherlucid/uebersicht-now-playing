@@ -10,18 +10,77 @@ const SIZE_KEY = 'cava_widget_size';
 const SCREEN_MARGIN = 2;
 const DEFAULT_BARS_COUNT = settings.barsCount || 28;
 
-function getGradientCss(colors, mode) {
+function hexToRgb(h) {
+  const clean = h.replace('#', '');
+  if (clean.length === 3) {
+    return [
+      parseInt(clean[0] + clean[0], 16),
+      parseInt(clean[1] + clean[1], 16),
+      parseInt(clean[2] + clean[2], 16),
+    ];
+  }
+  return [
+    parseInt(clean.slice(0, 2), 16),
+    parseInt(clean.slice(2, 4), 16),
+    parseInt(clean.slice(4, 6), 16),
+  ];
+}
+
+function rgbToHex(rgb) {
+  const r = Math.round(Math.max(0, Math.min(255, rgb[0])))
+    .toString(16)
+    .padStart(2, '0');
+  const g = Math.round(Math.max(0, Math.min(255, rgb[1])))
+    .toString(16)
+    .padStart(2, '0');
+  const b = Math.round(Math.max(0, Math.min(255, rgb[2])))
+    .toString(16)
+    .padStart(2, '0');
+  return `#${r}${g}${b}`;
+}
+
+// CAVA terminal color interpolation:
+// Interpolates gradient stops row-by-row across totalBands (terminal lines)
+function interpolateBands(stops, totalBands) {
+  if (!stops || stops.length === 0) return ['#59cc33'];
+  if (stops.length === 1 || totalBands <= 1) return [stops[0]];
+
+  const stopRgbs = stops.map(hexToRgb);
+  const nStops = stopRgbs.length;
+  const bands = [];
+
+  for (let b = 0; b < totalBands; b++) {
+    const t = b / (totalBands - 1);
+    const pos = t * (nStops - 1);
+    const idx = Math.min(nStops - 2, Math.floor(pos));
+    const frac = pos - idx;
+    const c1 = stopRgbs[idx];
+    const c2 = stopRgbs[idx + 1];
+
+    const interp = [
+      c1[0] + (c2[0] - c1[0]) * frac,
+      c1[1] + (c2[1] - c1[1]) * frac,
+      c1[2] + (c2[2] - c1[2]) * frac,
+    ];
+    bands.push(rgbToHex(interp));
+  }
+
+  return bands;
+}
+
+function getGradientCss(colors, mode, bandCount = 24) {
   if (!colors || colors.length === 0) return '#59cc33';
   if (colors.length === 1) return colors[0];
 
   if (mode === 'banded') {
-    const n = colors.length;
+    const bands = interpolateBands(colors, bandCount);
+    const n = bands.length;
     const step = 100 / n;
     const stops = [];
     for (let i = 0; i < n; i++) {
       const start = (i * step).toFixed(2);
       const end = ((i + 1) * step).toFixed(2);
-      stops.push(`${colors[i]} ${start}%`, `${colors[i]} ${end}%`);
+      stops.push(`${bands[i]} ${start}%`, `${bands[i]} ${end}%`);
     }
     return `linear-gradient(to top, ${stops.join(', ')})`;
   }
@@ -251,7 +310,8 @@ export const render = (state, dispatch) => {
 
   const barsData = bars.length > 0 ? bars : new Array(DEFAULT_BARS_COUNT).fill(0);
   const minHeight = typeof settings.minBarHeightPct === 'number' ? settings.minBarHeightPct : 2;
-  const gradientCss = getGradientCss(theme.gradient, settings.gradientMode);
+  const bandCount = settings.bandCount || 24;
+  const gradientCss = getGradientCss(theme.gradient, settings.gradientMode, bandCount);
   const gapPx = settings.barGap !== undefined ? settings.barGap : 3;
   const radiusPx = settings.barCornerRadius || 0;
 
@@ -271,12 +331,12 @@ export const render = (state, dispatch) => {
           </div>
         )}
 
-        {/* Terminal Visualizer Body with Fixed Vertical Color Regions */}
+        {/* Terminal Visualizer Body with Fixed Vertical Row-Banded Regions */}
         <div style={terminalBodyStyle}>
           <div style={{ ...barsContainerStyle, gap: `${gapPx}px` }}>
             {barsData.map((val, idx) => {
               // Calculate clipped percentage from top:
-              // Fixed gradient spans 100% of height. When bar rises, it reveals higher color regions.
+              // Fixed gradient spans 100% of height across all interpolated terminal rows.
               const heightPct = Math.max(minHeight, Math.min(100, val));
               const clipTop = (100 - heightPct).toFixed(2);
               const clipStyle = radiusPx > 0
