@@ -240,27 +240,6 @@ export const render = (state, dispatch) => {
     transition: isDragging ? 'none' : 'box-shadow 0.2s ease',
   };
 
-  // State: Nothing Playing or Error
-  if (error || !isPlaying) {
-    return (
-      <div style={positionStyle} onMouseDown={handleMouseDown}>
-        <div style={emptyCardStyle}>
-          <div style={emptyIconStyle}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-          </div>
-          <div style={emptyTextGroupStyle}>
-            <div style={emptyTitleStyle}>{error ? 'Widget Error' : 'Nothing Playing'}</div>
-            {error && <div style={emptySubtitleStyle}>{error}</div>}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={positionStyle} onMouseDown={handleMouseDown}>
       <div style={cardStyle}>
@@ -268,7 +247,7 @@ export const render = (state, dispatch) => {
         <div style={topRowStyle}>
           {/* Artwork Thumbnail */}
           <div style={artworkContainerStyle}>
-            {data.artwork ? (
+            {isPlaying && data?.artwork ? (
               <img src={data.artwork} alt="Album Art" style={artworkImageStyle} />
             ) : (
               <div style={artworkFallbackStyle}>
@@ -283,39 +262,47 @@ export const render = (state, dispatch) => {
 
           {/* Song Metadata */}
           <div style={metaContainerStyle}>
-            <div style={titleStyle} title={data.title}>
-              {data.title}
+            <div
+              style={titleStyle}
+              title={isPlaying ? data.title : (error ? 'Widget Error' : 'Nothing Playing')}
+            >
+              {isPlaying ? data.title : (error ? 'Widget Error' : 'Nothing Playing')}
             </div>
 
-            <div style={artistStyle} title={data.artist || 'Unknown Artist'}>
-              {data.artist || 'Unknown Artist'}
+            <div
+              style={artistStyle}
+              title={isPlaying ? (data.artist || 'Unknown Artist') : (error ? error : 'Playback Idle')}
+            >
+              {isPlaying ? (data.artist || 'Unknown Artist') : (error ? error : 'Playback Idle')}
             </div>
 
-            {data.album && data.album !== data.title && (
+            {isPlaying && data.album && data.album !== data.title ? (
               <div style={albumStyle} title={data.album}>
                 {data.album}
+              </div>
+            ) : (
+              <div style={{ ...albumStyle, opacity: 0.5 }}>
+                {isPlaying ? '' : (error ? 'Check connection' : 'No track active')}
               </div>
             )}
           </div>
         </div>
 
         {/* Middle Section: Progress Bar */}
-        {duration > 0 && (
-          <div style={progressSectionStyle}>
-            <div style={progressBarTrackStyle}>
-              <div
-                style={{
-                  ...progressBarFillStyle,
-                  width: `${progressPercent}%`,
-                }}
-              />
-            </div>
-            <div style={progressTimesStyle}>
-              <span>{formatTime(elapsed)}</span>
-              <span>{formatTime(duration)}</span>
-            </div>
+        <div style={progressSectionStyle}>
+          <div style={progressBarTrackStyle}>
+            <div
+              style={{
+                ...progressBarFillStyle,
+                width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
+              }}
+            />
           </div>
-        )}
+          <div style={progressTimesStyle}>
+            <span>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
+            <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
+          </div>
+        </div>
 
         {/* Bottom Section: Media Controls */}
         <div style={controlsRowStyle}>
@@ -338,15 +325,15 @@ export const render = (state, dispatch) => {
             style={playPauseBtnStyle}
             onClick={(e) => handleControl('togglePlayPause', e)}
             onMouseDown={(e) => e.stopPropagation()}
-            title={isPaused ? 'Play' : 'Pause'}
+            title={isPlaying && !isPaused ? 'Pause' : 'Play'}
           >
-            {isPaused ? (
+            {isPlaying && !isPaused ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
-                <path d="M8 5v14l11-7z" />
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
               </svg>
             ) : (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
-                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                <path d="M8 5v14l11-7z" />
               </svg>
             )}
           </button>
@@ -396,56 +383,9 @@ const cardStyle = {
   borderRadius: '20px',
   boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3)',
   border: '1px solid rgba(255, 255, 255, 0.12)',
-  minWidth: '270px',
-  maxWidth: '320px',
+  width: '300px',
+  minWidth: '300px',
   boxSizing: 'border-box',
-};
-
-const emptyCardStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '12px',
-  backgroundColor: 'rgba(22, 22, 26, 0.82)',
-  backdropFilter: 'blur(25px)',
-  WebkitBackdropFilter: 'blur(25px)',
-  padding: '10px 16px',
-  borderRadius: '16px',
-  boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  maxWidth: '260px',
-};
-
-const emptyIconStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  flexShrink: 0,
-  width: '30px',
-  height: '30px',
-  borderRadius: '8px',
-  backgroundColor: 'rgba(255, 255, 255, 0.08)',
-};
-
-const emptyTextGroupStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-};
-
-const emptyTitleStyle = {
-  fontSize: '13px',
-  fontWeight: '600',
-  color: 'rgba(255, 255, 255, 0.95)',
-  letterSpacing: '-0.2px',
-};
-
-const emptySubtitleStyle = {
-  fontSize: '11px',
-  color: 'rgba(255, 255, 255, 0.5)',
-  marginTop: '2px',
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
 };
 
 const topRowStyle = {
@@ -485,6 +425,7 @@ const artworkFallbackStyle = {
 const metaContainerStyle = {
   display: 'flex',
   flexDirection: 'column',
+  justifyContent: 'center',
   flex: 1,
   minWidth: 0,
   overflow: 'hidden',
