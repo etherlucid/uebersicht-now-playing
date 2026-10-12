@@ -669,8 +669,59 @@ export const render = (state, dispatch) => {
           </div>
         )}
 
+        {/* Force clean translucent scrollbars on WebKit without browser white borders */}
+        <style dangerouslySetInnerHTML={{ __html: `
+          .shell-terminal-scroll,
+          .shell-terminal-scroll * {
+            color-scheme: dark !important;
+            scrollbar-width: thin !important;
+            scrollbar-color: rgba(255, 255, 255, 0.18) transparent !important;
+          }
+          .shell-terminal-scroll::-webkit-scrollbar,
+          .shell-terminal-scroll *::-webkit-scrollbar {
+            width: 4px !important;
+            height: 4px !important;
+            background: transparent !important;
+            background-color: transparent !important;
+          }
+          .shell-terminal-scroll::-webkit-scrollbar-track,
+          .shell-terminal-scroll *::-webkit-scrollbar-track,
+          .shell-terminal-scroll::-webkit-scrollbar-track-piece,
+          .shell-terminal-scroll *::-webkit-scrollbar-track-piece {
+            background: transparent !important;
+            background-color: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+          .shell-terminal-scroll::-webkit-scrollbar-thumb,
+          .shell-terminal-scroll *::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.18) !important;
+            background-color: rgba(255, 255, 255, 0.18) !important;
+            border-radius: 4px !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+          .shell-terminal-scroll::-webkit-scrollbar-thumb:hover,
+          .shell-terminal-scroll *::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.35) !important;
+            background-color: rgba(255, 255, 255, 0.35) !important;
+          }
+          .shell-terminal-scroll::-webkit-scrollbar-corner,
+          .shell-terminal-scroll *::-webkit-scrollbar-corner {
+            background: transparent !important;
+            background-color: transparent !important;
+          }
+          .shell-terminal-scroll::-webkit-scrollbar-button,
+          .shell-terminal-scroll *::-webkit-scrollbar-button {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+          }
+        ` }} />
+
         {/* Terminal Body */}
         <div
+          className="shell-terminal-scroll"
           ref={(el) => {
             if (el) {
               el.scrollTop = el.scrollHeight;
@@ -768,6 +819,7 @@ export const render = (state, dispatch) => {
 };
 
 export const className = `
+  color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   color: ${ITERM2_THEME.fg};
 
@@ -781,27 +833,57 @@ export const className = `
   }
 
   /* Thin, barely-visible scrollbars with zero background fill */
+  & *::-webkit-scrollbar,
+  *::-webkit-scrollbar,
   ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-    background: transparent;
+    width: 4px !important;
+    height: 4px !important;
+    background: transparent !important;
+    background-color: transparent !important;
   }
-  ::-webkit-scrollbar-track {
-    background: transparent;
+  & *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-track,
+  & *::-webkit-scrollbar-track-piece,
+  *::-webkit-scrollbar-track-piece,
+  ::-webkit-scrollbar-track-piece {
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
   }
+  & *::-webkit-scrollbar-thumb,
+  *::-webkit-scrollbar-thumb,
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.18) !important;
+    background-color: rgba(255, 255, 255, 0.18) !important;
+    border-radius: 4px !important;
+    border: none !important;
+    box-shadow: none !important;
   }
+  & *::-webkit-scrollbar-thumb:hover,
+  *::-webkit-scrollbar-thumb:hover,
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.35) !important;
+    background-color: rgba(255, 255, 255, 0.35) !important;
   }
+  & *::-webkit-scrollbar-corner,
+  *::-webkit-scrollbar-corner,
   ::-webkit-scrollbar-corner {
-    background: transparent;
+    background: transparent !important;
+    background-color: transparent !important;
+  }
+  & *::-webkit-scrollbar-button,
+  *::-webkit-scrollbar-button,
+  ::-webkit-scrollbar-button {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
   }
 `;
 
 const windowStyle = {
+  colorScheme: 'dark',
   position: 'relative',
   width: '100%',
   height: '100%',
@@ -851,6 +933,7 @@ const titleTextStyle = {
 };
 
 const terminalBodyStyle = {
+  colorScheme: 'dark',
   flex: 1,
   padding: settings.showTitleBar ? '10px 14px' : '14px 16px',
   overflowY: 'auto',
@@ -862,6 +945,8 @@ const terminalBodyStyle = {
   userSelect: 'text',
   WebkitUserSelect: 'text',
   boxSizing: 'border-box',
+  scrollbarWidth: 'thin',
+  scrollbarColor: 'rgba(255, 255, 255, 0.18) transparent',
 };
 
 const lineStyle = {
