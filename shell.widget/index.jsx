@@ -112,7 +112,7 @@ const getInitialSize = () => {
       }
     }
   } catch (e) {}
-  return configuredCommand ? { w: 600, h: 480 } : { w: 420, h: 220 };
+  return configuredCommand ? { w: 520, h: 300 } : { w: 420, h: 220 };
 };
 
 const initialPos = getInitialPosition();
@@ -779,6 +779,26 @@ export const className = `
   input::placeholder {
     color: rgba(252, 232, 195, 0.35);
   }
+
+  /* Thin, barely-visible scrollbars with zero background fill */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+    background: transparent;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.35);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 `;
 
 const windowStyle = {
@@ -836,8 +856,8 @@ const terminalBodyStyle = {
   overflowY: 'auto',
   overflowX: 'auto',
   fontFamily: '"SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace',
-  fontSize: '12px',
-  lineHeight: '1.45',
+  fontSize: settings.fontSize || '11px',
+  lineHeight: settings.lineHeight || '1.35',
   cursor: configuredCommand ? 'grab' : 'text',
   userSelect: 'text',
   WebkitUserSelect: 'text',

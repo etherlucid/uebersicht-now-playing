@@ -35,10 +35,17 @@ export const settings = {
   showTitleBar: false, // Set to true to restore the window titlebar
   title: 'zsh',
 
+  // Typography
+  fontSize: '11px',
+  lineHeight: '1.35',
+
   // Single command mode:
-  // Set to a command string (e.g. 'fastfetch') to run only that command and display its output.
-  // Set to '' or null to restore the interactive shell prompt.
-  command: 'fastfetch',
+  // Concise fastfetch layout (key specs aligned to Apple ASCII logo without verbose clutter):
+  command: 'fastfetch -s Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:CPU:GPU:Memory:Battery',
+  // Alternative presets:
+  // command: 'fastfetch -c neofetch', // Neofetch layout
+  // command: 'fastfetch',             // Full verbose default
+  // command: '',                      // Interactive shell prompt
 
   // Refresh frequency for single command mode:
   // false = run once on load; or set to milliseconds (e.g. 60000 for 1 min, 300000 for 5 min)
