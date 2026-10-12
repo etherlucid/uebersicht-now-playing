@@ -1,9 +1,15 @@
 import { React, run } from 'uebersicht';
 import { theme as ITERM2_THEME, settings } from './lib/config.js';
 
-export const refreshFrequency = false;
+const configuredCommand = settings.command || settings.singleCommand || '';
 
-export const command = '';
+export const refreshFrequency = settings.refreshFrequency !== undefined
+  ? settings.refreshFrequency
+  : false;
+
+export const command = configuredCommand
+  ? `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" CLICOLOR_FORCE=1 FORCE_COLOR=1; script -q /dev/null zsh -l -c ${JSON.stringify(configuredCommand)}`
+  : '';
 
 const POS_KEY = 'shell_widget_position';
 const SIZE_KEY = 'shell_widget_size';
@@ -97,7 +103,7 @@ const getInitialSize = () => {
       }
     }
   } catch (e) {}
-  return { w: 420, h: 220 };
+  return configuredCommand ? { w: 600, h: 480 } : { w: 420, h: 220 };
 };
 
 const initialPos = getInitialPosition();
@@ -127,6 +133,34 @@ export const initialState = {
 
 export const updateState = (event, previousState) => {
   if (!previousState) return initialState;
+
+  if (event.type === 'UB/COMMAND_RAN') {
+    if (event.error) {
+      return {
+        ...previousState,
+        isRunning: false,
+        lines: [{ type: 'error', text: event.error }],
+      };
+    }
+    if (event.output && event.output.trim()) {
+      return {
+        ...previousState,
+        isRunning: false,
+        lines: [{ type: 'output', text: event.output }],
+      };
+    }
+    return {
+      ...previousState,
+      isRunning: false,
+    };
+  }
+
+  if (event.type === 'MANUAL_REFRESH') {
+    return {
+      ...previousState,
+      isRunning: true,
+    };
+  }
 
   if (event.type === 'COMMAND_START') {
     return {
@@ -394,9 +428,31 @@ export const render = (state, dispatch) => {
     isRunning = false,
   } = state || {};
 
+  const isSingleCommandMode = Boolean(configuredCommand);
+  const showPrompt = settings.showPrompt !== undefined ? settings.showPrompt : !isSingleCommandMode;
+
+  const handleRefresh = (e) => {
+    if (e) e.stopPropagation();
+    if (!configuredCommand) return;
+    dispatch({ type: 'MANUAL_REFRESH' });
+    const fullCmd = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" CLICOLOR_FORCE=1 FORCE_COLOR=1; script -q /dev/null zsh -l -c ${JSON.stringify(configuredCommand)}`;
+    run(fullCmd)
+      .then((output) => {
+        if (output && output.trim()) {
+          dispatch({ type: 'UB/COMMAND_RAN', output });
+        } else {
+          dispatch({ type: 'COMMAND_FINISHED' });
+        }
+      })
+      .catch((err) => {
+        const errMsg = err?.message || String(err);
+        dispatch({ type: 'UB/COMMAND_RAN', error: errMsg });
+      });
+  };
+
   const handleMouseDown = (e) => {
     if (e.button !== 0) return;
-    if (e.target.closest('[data-no-drag="true"]')) return;
+    if (e.target.closest('input, textarea, button, a, [data-no-drag="true"]')) return;
 
     e.preventDefault();
     dispatch({ type: 'START_DRAG', clientX: e.clientX, clientY: e.clientY });
@@ -574,25 +630,31 @@ export const render = (state, dispatch) => {
         }
       }}
     >
-      <div style={windowStyle}>
-        {/* Title Bar */}
-        <div style={titleBarStyle}>
-          <div style={trafficLightsStyle}>
-            <span
-              style={{ ...dotStyle, backgroundColor: '#ff5f56' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                dispatch({ type: 'CLEAR_LINES' });
-              }}
-              title="Clear terminal"
-              data-no-drag="true"
-            />
-            <span style={{ ...dotStyle, backgroundColor: '#ffbd2e' }} />
-            <span style={{ ...dotStyle, backgroundColor: '#27c93f' }} />
+      <div
+        style={windowStyle}
+        onDoubleClick={isSingleCommandMode ? handleRefresh : undefined}
+        title={isSingleCommandMode ? `${configuredCommand} (double-click to re-run)` : undefined}
+      >
+        {/* Optional Title Bar (matching cava.widget, hidden when showTitleBar is false) */}
+        {settings.showTitleBar && (
+          <div style={titleBarStyle}>
+            <div style={trafficLightsStyle}>
+              <span
+                style={{ ...dotStyle, backgroundColor: '#ff5f56' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dispatch({ type: 'CLEAR_LINES' });
+                }}
+                title="Clear terminal"
+                data-no-drag="true"
+              />
+              <span style={{ ...dotStyle, backgroundColor: '#ffbd2e' }} />
+              <span style={{ ...dotStyle, backgroundColor: '#27c93f' }} />
+            </div>
+            <div style={titleTextStyle}>{windowTitle}</div>
+            <div style={{ width: '48px' }} />
           </div>
-          <div style={titleTextStyle}>{windowTitle}</div>
-          <div style={{ width: '48px' }} />
-        </div>
+        )}
 
         {/* Terminal Body */}
         <div
@@ -602,10 +664,11 @@ export const render = (state, dispatch) => {
             }
           }}
           style={terminalBodyStyle}
-          data-no-drag="true"
           onClick={() => {
-            const inputEl = document.getElementById('shell-widget-input');
-            if (inputEl) inputEl.focus();
+            if (showPrompt) {
+              const inputEl = document.getElementById('shell-widget-input');
+              if (inputEl) inputEl.focus();
+            }
           }}
         >
           {lines.map((line, idx) => (
@@ -623,37 +686,48 @@ export const render = (state, dispatch) => {
             </div>
           ))}
 
-          {/* Active Running State or Interactive Prompt */}
-          {isRunning ? (
+          {/* Loading Indicator for Single Command Mode */}
+          {isSingleCommandMode && lines.length === 0 && (
             <div style={runningRowStyle}>
               <span style={runningDotStyle} />
-              <span style={runningTextStyle}>running...</span>
-              <span
-                style={abortButtonStyle}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  dispatch({ type: 'CANCEL_COMMAND' });
-                }}
-                title="Cancel command (Ctrl+C / Esc)"
-              >
-                ✕ cancel
-              </span>
+              <span style={runningTextStyle}>loading {configuredCommand}...</span>
             </div>
-          ) : (
-            <div style={promptRowStyle}>
-              <span style={promptSymbolStyle}>{promptSymbol}</span>
-              <input
-                id="shell-widget-input"
-                type="text"
-                value={inputValue}
-                onChange={(e) => dispatch({ type: 'SET_INPUT', value: e.target.value })}
-                onKeyDown={handleKeyDown}
-                placeholder={promptPlaceholder}
-                style={inputStyle}
-                data-no-drag="true"
-                autoFocus={true}
-              />
-            </div>
+          )}
+
+          {/* Active Running State or Interactive Prompt */}
+          {showPrompt && (
+            isRunning ? (
+              <div style={runningRowStyle}>
+                <span style={runningDotStyle} />
+                <span style={runningTextStyle}>running...</span>
+                <span
+                  style={abortButtonStyle}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dispatch({ type: 'CANCEL_COMMAND' });
+                  }}
+                  title="Cancel command (Ctrl+C / Esc)"
+                  data-no-drag="true"
+                >
+                  ✕ cancel
+                </span>
+              </div>
+            ) : (
+              <div style={promptRowStyle}>
+                <span style={promptSymbolStyle}>{promptSymbol}</span>
+                <input
+                  id="shell-widget-input"
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => dispatch({ type: 'SET_INPUT', value: e.target.value })}
+                  onKeyDown={handleKeyDown}
+                  placeholder={promptPlaceholder}
+                  style={inputStyle}
+                  data-no-drag="true"
+                  autoFocus={true}
+                />
+              </div>
+            )
           )}
         </div>
 
@@ -740,29 +814,29 @@ const titleTextStyle = {
 
 const terminalBodyStyle = {
   flex: 1,
-  padding: '10px 14px',
+  padding: settings.showTitleBar ? '10px 14px' : '14px 16px',
   overflowY: 'auto',
-  overflowX: 'hidden',
+  overflowX: 'auto',
   fontFamily: '"SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace',
   fontSize: '12px',
   lineHeight: '1.45',
-  cursor: 'text',
+  cursor: configuredCommand ? 'grab' : 'text',
   userSelect: 'text',
   WebkitUserSelect: 'text',
+  boxSizing: 'border-box',
 };
 
 const lineStyle = {
-  marginBottom: '4px',
-  wordBreak: 'break-word',
-  whiteSpace: 'pre-wrap',
+  marginBottom: '2px',
+  whiteSpace: 'pre',
 };
 
 const preStyle = {
   margin: 0,
   fontFamily: 'inherit',
   fontSize: 'inherit',
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-word',
+  whiteSpace: 'pre',
+  wordBreak: 'normal',
 };
 
 const promptRowStyle = {

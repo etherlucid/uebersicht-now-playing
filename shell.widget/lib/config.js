@@ -31,7 +31,20 @@ export const theme = {
 };
 
 export const settings = {
+  // Window appearance (matches cava.widget)
+  showTitleBar: false, // Set to true to restore the window titlebar
   title: 'zsh',
+
+  // Single command mode:
+  // Set to a command string (e.g. 'fastfetch') to run only that command and display its output.
+  // Set to '' or null to restore the interactive shell prompt.
+  command: 'fastfetch',
+
+  // Refresh frequency for single command mode:
+  // false = run once on load; or set to milliseconds (e.g. 60000 for 1 min, 300000 for 5 min)
+  refreshFrequency: false,
+
+  // Prompt settings (used when command is empty)
   promptSymbol: '❯',
   placeholder: 'run command...',
   timeoutSeconds: 15,
