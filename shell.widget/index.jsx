@@ -1,15 +1,24 @@
 import { React, run } from 'uebersicht';
 import { theme as ITERM2_THEME, settings } from './lib/config.js';
 
+function formatShellCommand(cmd) {
+  if (!cmd) return '';
+  let c = cmd.trim();
+  if (c === 'fastfetch' || c.startsWith('fastfetch ')) {
+    if (!c.includes('--pipe')) {
+      c = `${c} --pipe false`;
+    }
+  }
+  return `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" CLICOLOR_FORCE=1 FORCE_COLOR=1; zsh -l -c ${JSON.stringify(c)}`;
+}
+
 const configuredCommand = settings.command || settings.singleCommand || '';
 
 export const refreshFrequency = settings.refreshFrequency !== undefined
   ? settings.refreshFrequency
   : false;
 
-export const command = configuredCommand
-  ? `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" CLICOLOR_FORCE=1 FORCE_COLOR=1; script -q /dev/null zsh -l -c ${JSON.stringify(configuredCommand)}`
-  : '';
+export const command = configuredCommand ? formatShellCommand(configuredCommand) : '';
 
 const POS_KEY = 'shell_widget_position';
 const SIZE_KEY = 'shell_widget_size';
@@ -136,17 +145,20 @@ export const updateState = (event, previousState) => {
 
   if (event.type === 'UB/COMMAND_RAN') {
     if (event.error) {
+      const errMsg = typeof event.error === 'string'
+        ? event.error
+        : (event.error?.message || String(event.error));
       return {
         ...previousState,
         isRunning: false,
-        lines: [{ type: 'error', text: event.error }],
+        lines: [{ type: 'error', text: errMsg }],
       };
     }
-    if (event.output && event.output.trim()) {
+    if (event.output && String(event.output).trim()) {
       return {
         ...previousState,
         isRunning: false,
-        lines: [{ type: 'output', text: event.output }],
+        lines: [{ type: 'output', text: String(event.output) }],
       };
     }
     return {
@@ -435,17 +447,19 @@ export const render = (state, dispatch) => {
     if (e) e.stopPropagation();
     if (!configuredCommand) return;
     dispatch({ type: 'MANUAL_REFRESH' });
-    const fullCmd = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" CLICOLOR_FORCE=1 FORCE_COLOR=1; script -q /dev/null zsh -l -c ${JSON.stringify(configuredCommand)}`;
+    const fullCmd = formatShellCommand(configuredCommand);
     run(fullCmd)
       .then((output) => {
-        if (output && output.trim()) {
-          dispatch({ type: 'UB/COMMAND_RAN', output });
+        if (output && String(output).trim()) {
+          dispatch({ type: 'UB/COMMAND_RAN', output: String(output) });
         } else {
           dispatch({ type: 'COMMAND_FINISHED' });
         }
       })
       .catch((err) => {
-        const errMsg = err?.message || String(err);
+        const errMsg = typeof err === 'string'
+          ? err
+          : (err?.message || String(err));
         dispatch({ type: 'UB/COMMAND_RAN', error: errMsg });
       });
   };
@@ -545,8 +559,7 @@ export const render = (state, dispatch) => {
         execCmd = `${cmd} -c 4`;
       }
 
-      // Execute via PTY (script -q /dev/null) to force authentic TTY colors and formatting
-      const fullCmd = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" CLICOLOR_FORCE=1 FORCE_COLOR=1; script -q /dev/null zsh -l -c ${JSON.stringify(execCmd)}`;
+      const fullCmd = formatShellCommand(execCmd);
 
       const timeoutMs = (settings.timeoutSeconds || 15) * 1000;
       let hasCompleted = false;
@@ -671,20 +684,25 @@ export const render = (state, dispatch) => {
             }
           }}
         >
-          {lines.map((line, idx) => (
-            <div key={idx} style={lineStyle}>
-              {line.type === 'command' ? (
-                <span>
-                  <span style={{ color: ITERM2_THEME.yellow, marginRight: '6px', fontWeight: '700' }}>{promptSymbol}</span>
-                  <span style={{ color: ITERM2_THEME.brightWhite }}>{line.text}</span>
-                </span>
-              ) : line.type === 'error' ? (
-                <span style={{ color: ITERM2_THEME.red }}>{line.text}</span>
-              ) : (
-                <pre style={preStyle}>{renderAnsiText(line.text)}</pre>
-              )}
-            </div>
-          ))}
+          {lines.map((line, idx) => {
+            const lineText = typeof line?.text === 'string'
+              ? line.text
+              : (line?.text?.message || String(line?.text || ''));
+            return (
+              <div key={idx} style={lineStyle}>
+                {line.type === 'command' ? (
+                  <span>
+                    <span style={{ color: ITERM2_THEME.yellow, marginRight: '6px', fontWeight: '700' }}>{promptSymbol}</span>
+                    <span style={{ color: ITERM2_THEME.brightWhite }}>{lineText}</span>
+                  </span>
+                ) : line.type === 'error' ? (
+                  <span style={{ color: ITERM2_THEME.red }}>{lineText}</span>
+                ) : (
+                  <pre style={preStyle}>{renderAnsiText(lineText)}</pre>
+                )}
+              </div>
+            );
+          })}
 
           {/* Loading Indicator for Single Command Mode */}
           {isSingleCommandMode && lines.length === 0 && (
