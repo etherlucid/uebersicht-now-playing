@@ -709,7 +709,7 @@ export const render = (state, dispatch) => {
               borderRadius: '13px',
               padding: '5px',
               boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.4)',
-              minWidth: '165px',
+              minWidth: '135px',
               color: '#ffffff',
               userSelect: 'none',
               WebkitUserSelect: 'none',
@@ -732,9 +732,9 @@ export const render = (state, dispatch) => {
               Widget Size
             </div>
             {[
-              { id: 'small', label: 'Small (1:1)', icon: '▫' },
-              { id: 'medium', label: 'Medium (Standard)', icon: '▭' },
-              { id: 'large', label: 'Large (Expanded Art)', icon: '◻' },
+              { id: 'small', label: 'Small' },
+              { id: 'medium', label: 'Medium' },
+              { id: 'large', label: 'Large' },
             ].map((item) => {
               const isSelected = (sizePreset || 'medium') === item.id;
               return (
@@ -749,9 +749,9 @@ export const render = (state, dispatch) => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '6px 8px',
+                    padding: '6px 10px',
                     borderRadius: '7px',
-                    fontSize: '11.5px',
+                    fontSize: '12px',
                     fontWeight: isSelected ? '600' : '400',
                     color: isSelected ? '#FFFFFF' : 'rgba(255, 255, 255, 0.82)',
                     backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
@@ -759,10 +759,7 @@ export const render = (state, dispatch) => {
                     margin: '1px 0',
                   }}
                 >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ opacity: 0.5, fontSize: '10px' }}>{item.icon}</span>
-                    <span>{item.label}</span>
-                  </span>
+                  <span>{item.label}</span>
                   {isSelected && (
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="20 6 9 17 4 12" />
