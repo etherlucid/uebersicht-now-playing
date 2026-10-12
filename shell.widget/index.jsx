@@ -674,22 +674,22 @@ export const render = (state, dispatch) => {
           .shell-terminal-scroll,
           .shell-terminal-scroll * {
             color-scheme: dark !important;
-            scrollbar-width: thin !important;
-            scrollbar-color: rgba(255, 255, 255, 0.18) transparent !important;
+            scrollbar-width: auto !important;
+            scrollbar-color: auto !important;
           }
           .shell-terminal-scroll::-webkit-scrollbar,
           .shell-terminal-scroll *::-webkit-scrollbar {
             width: 4px !important;
             height: 4px !important;
             background: transparent !important;
-            background-color: transparent !important;
+            background-color: rgba(0, 0, 0, 0) !important;
           }
           .shell-terminal-scroll::-webkit-scrollbar-track,
           .shell-terminal-scroll *::-webkit-scrollbar-track,
           .shell-terminal-scroll::-webkit-scrollbar-track-piece,
           .shell-terminal-scroll *::-webkit-scrollbar-track-piece {
             background: transparent !important;
-            background-color: transparent !important;
+            background-color: rgba(0, 0, 0, 0) !important;
             border: none !important;
             box-shadow: none !important;
           }
@@ -707,9 +707,13 @@ export const render = (state, dispatch) => {
             background-color: rgba(255, 255, 255, 0.35) !important;
           }
           .shell-terminal-scroll::-webkit-scrollbar-corner,
-          .shell-terminal-scroll *::-webkit-scrollbar-corner {
+          .shell-terminal-scroll *::-webkit-scrollbar-corner,
+          .shell-terminal-scroll::-webkit-resizer,
+          .shell-terminal-scroll *::-webkit-resizer {
             background: transparent !important;
-            background-color: transparent !important;
+            background-color: rgba(0, 0, 0, 0) !important;
+            border: none !important;
+            box-shadow: none !important;
           }
           .shell-terminal-scroll::-webkit-scrollbar-button,
           .shell-terminal-scroll *::-webkit-scrollbar-button {
@@ -839,7 +843,7 @@ export const className = `
     width: 4px !important;
     height: 4px !important;
     background: transparent !important;
-    background-color: transparent !important;
+    background-color: rgba(0, 0, 0, 0) !important;
   }
   & *::-webkit-scrollbar-track,
   *::-webkit-scrollbar-track,
@@ -848,7 +852,18 @@ export const className = `
   *::-webkit-scrollbar-track-piece,
   ::-webkit-scrollbar-track-piece {
     background: transparent !important;
-    background-color: transparent !important;
+    background-color: rgba(0, 0, 0, 0) !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  & *::-webkit-scrollbar-corner,
+  *::-webkit-scrollbar-corner,
+  ::-webkit-scrollbar-corner,
+  & *::-webkit-resizer,
+  *::-webkit-resizer,
+  ::-webkit-resizer {
+    background: transparent !important;
+    background-color: rgba(0, 0, 0, 0) !important;
     border: none !important;
     box-shadow: none !important;
   }
@@ -866,12 +881,6 @@ export const className = `
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.35) !important;
     background-color: rgba(255, 255, 255, 0.35) !important;
-  }
-  & *::-webkit-scrollbar-corner,
-  *::-webkit-scrollbar-corner,
-  ::-webkit-scrollbar-corner {
-    background: transparent !important;
-    background-color: transparent !important;
   }
   & *::-webkit-scrollbar-button,
   *::-webkit-scrollbar-button,
@@ -945,8 +954,6 @@ const terminalBodyStyle = {
   userSelect: 'text',
   WebkitUserSelect: 'text',
   boxSizing: 'border-box',
-  scrollbarWidth: 'thin',
-  scrollbarColor: 'rgba(255, 255, 255, 0.18) transparent',
 };
 
 const lineStyle = {
