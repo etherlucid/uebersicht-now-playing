@@ -5,6 +5,7 @@ export const refreshFrequency = 1000;
 export const command = `python3 "$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/get_song.py" 2>/dev/null || python3 "nowplaying.widget/get_song.py" 2>/dev/null || python3 "ytmusic.widget/get_song.py"`;
 
 const STORAGE_KEY = 'nowplaying_widget_position';
+const STORAGE_SIZE_KEY = 'nowplaying_widget_size_preset';
 const SCREEN_MARGIN = 2;
 
 const getInitialPosition = () => {
@@ -25,18 +26,31 @@ const getInitialPosition = () => {
   return { x: 50, y: 50 };
 };
 
+const getInitialSizePreset = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_SIZE_KEY);
+    if (saved === 'small' || saved === 'medium' || saved === 'large') {
+      return saved;
+    }
+  } catch (e) {}
+  return 'medium';
+};
+
 const initialPos = getInitialPosition();
+const initialPreset = getInitialSizePreset();
 
 export const initialState = {
   x: initialPos.x,
   y: initialPos.y,
+  sizePreset: initialPreset,
+  contextMenu: null,
   isDragging: false,
   dragStartX: 0,
   dragStartY: 0,
   startPosX: 0,
   startPosY: 0,
-  cardWidth: 320,
-  cardHeight: 160,
+  cardWidth: initialPreset === 'small' ? 154 : 300,
+  cardHeight: initialPreset === 'small' ? 154 : (initialPreset === 'large' ? 435 : 154),
   data: { playing: false },
   error: null,
 };
@@ -112,12 +126,13 @@ export const updateState = (event, previousState) => {
   if (event.type === 'START_DRAG') {
     return {
       ...previousState,
+      contextMenu: null,
       isDragging: true,
       dragStartX: event.clientX,
       dragStartY: event.clientY,
       startPosX: previousState.x,
       startPosY: previousState.y,
-      cardWidth: event.cardWidth || previousState.cardWidth || 320,
+      cardWidth: event.cardWidth || previousState.cardWidth || 300,
       cardHeight: event.cardHeight || previousState.cardHeight || 160,
     };
   }
@@ -125,7 +140,7 @@ export const updateState = (event, previousState) => {
   if (event.type === 'MOVE_DRAG' && previousState.isDragging) {
     const deltaX = event.clientX - previousState.dragStartX;
     const deltaY = event.clientY - previousState.dragStartY;
-    const cardWidth = previousState.cardWidth || 320;
+    const cardWidth = previousState.cardWidth || 300;
     const cardHeight = previousState.cardHeight || 160;
 
     const maxX = Math.max(SCREEN_MARGIN, window.innerWidth - cardWidth - SCREEN_MARGIN);
@@ -152,6 +167,48 @@ export const updateState = (event, previousState) => {
     };
   }
 
+  if (event.type === 'SET_SIZE_PRESET') {
+    try {
+      localStorage.setItem(STORAGE_SIZE_KEY, event.preset);
+    } catch (e) {}
+
+    const newW = event.preset === 'small' ? 154 : 300;
+    const newH = event.preset === 'small' ? 154 : (event.preset === 'large' ? 435 : 154);
+    const maxX = Math.max(SCREEN_MARGIN, (window.innerWidth || 1920) - newW - SCREEN_MARGIN);
+    const maxY = Math.max(SCREEN_MARGIN, (window.innerHeight || 1080) - newH - SCREEN_MARGIN);
+
+    const clampedX = Math.max(SCREEN_MARGIN, Math.min(maxX, previousState.x));
+    const clampedY = Math.max(SCREEN_MARGIN, Math.min(maxY, previousState.y));
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ x: clampedX, y: clampedY }));
+    } catch (e) {}
+
+    return {
+      ...previousState,
+      sizePreset: event.preset,
+      cardWidth: newW,
+      cardHeight: newH,
+      x: clampedX,
+      y: clampedY,
+      contextMenu: null,
+    };
+  }
+
+  if (event.type === 'OPEN_CONTEXT_MENU') {
+    return {
+      ...previousState,
+      contextMenu: { x: event.x, y: event.y },
+    };
+  }
+
+  if (event.type === 'CLOSE_CONTEXT_MENU') {
+    return {
+      ...previousState,
+      contextMenu: null,
+    };
+  }
+
   return previousState;
 };
 
@@ -174,7 +231,15 @@ if (typeof window !== 'undefined' && !window.__nowplaying_ticker_started) {
 
 export const render = (state, dispatch) => {
   currentDispatch = dispatch;
-  const { data, error, x = 50, y = 50, isDragging } = state || {};
+  const {
+    data,
+    error,
+    x = 50,
+    y = 50,
+    isDragging,
+    sizePreset = 'medium',
+    contextMenu = null,
+  } = state || {};
 
   const handleMouseDown = (e) => {
     if (e.button !== 0) return;
@@ -182,8 +247,10 @@ export const render = (state, dispatch) => {
 
     e.preventDefault();
     const rect = e.currentTarget ? e.currentTarget.getBoundingClientRect() : null;
-    const cardWidth = rect ? rect.width : 320;
-    const cardHeight = rect ? rect.height : 160;
+    const defaultW = sizePreset === 'small' ? 154 : 300;
+    const defaultH = sizePreset === 'small' ? 154 : (sizePreset === 'large' ? 435 : 154);
+    const cardWidth = rect ? rect.width : defaultW;
+    const cardHeight = rect ? rect.height : defaultH;
 
     dispatch({
       type: 'START_DRAG',
@@ -207,6 +274,20 @@ export const render = (state, dispatch) => {
     window.addEventListener('mouseup', handleMouseUp);
   };
 
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const menuW = 175;
+    const menuH = 145;
+    const maxX = (window.innerWidth || 1920) - menuW - 12;
+    const maxY = (window.innerHeight || 1080) - menuH - 12;
+    dispatch({
+      type: 'OPEN_CONTEXT_MENU',
+      x: Math.max(12, Math.min(maxX, e.clientX)),
+      y: Math.max(12, Math.min(maxY, e.clientY)),
+    });
+  };
+
   const handleControl = (action, e) => {
     e.stopPropagation();
     if (action === 'togglePlayPause') {
@@ -218,8 +299,8 @@ export const render = (state, dispatch) => {
     run(`${cli} ${action} 2>/dev/null || nowplaying-cli ${action}`);
   };
 
-  const isPlaying = data && data.playing && data.title;
-  const isPaused = isPlaying && data.rate === 0;
+  const isPlaying = Boolean(data && data.playing && data.title);
+  const isPaused = Boolean(isPlaying && data.rate === 0);
 
   const duration = data?.duration || 0;
   const baseElapsed = data?.elapsed || 0;
@@ -228,6 +309,10 @@ export const render = (state, dispatch) => {
     ? Math.min(duration, baseElapsed + Math.max(0, timeSinceUpdate))
     : baseElapsed;
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (elapsed / duration) * 100)) : 0;
+
+  const title = isPlaying ? data.title : (error ? 'Widget Error' : 'Nothing Playing');
+  const artist = isPlaying ? (data.artist || 'Unknown Artist') : (error ? error : 'Playback Idle');
+  const album = isPlaying ? (data.album || '') : '';
 
   const positionStyle = {
     position: 'absolute',
@@ -241,118 +326,455 @@ export const render = (state, dispatch) => {
   };
 
   return (
-    <div style={positionStyle} onMouseDown={handleMouseDown}>
-      <div style={cardStyle}>
-        {/* Top Section: Artwork + Info */}
-        <div style={topRowStyle}>
-          {/* Artwork Thumbnail */}
-          <div style={artworkContainerStyle}>
-            {isPlaying && data?.artwork ? (
-              <img src={data.artwork} alt="Album Art" style={artworkImageStyle} />
-            ) : (
-              <div style={artworkFallbackStyle}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
+    <React.Fragment>
+      <div
+        style={positionStyle}
+        onMouseDown={handleMouseDown}
+        onContextMenu={handleContextMenu}
+      >
+        {sizePreset === 'small' ? (
+          /* ========================================= */
+          /* SMALL PRESET (~1:1 Aspect Ratio, 154x154) */
+          /* ========================================= */
+          <div style={smallCardStyle}>
+            {/* Artwork 56x56 */}
+            <div style={smallArtworkContainerStyle}>
+              {isPlaying && data?.artwork ? (
+                <img src={data.artwork} alt="Album Art" style={artworkImageStyle} />
+              ) : (
+                <div style={artworkFallbackStyle}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                  </svg>
+                </div>
+              )}
+            </div>
+
+            {/* Song Metadata */}
+            <div style={{ width: '100%', textAlign: 'center', overflow: 'hidden', margin: '2px 0' }}>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  color: '#FFFFFF',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  lineHeight: '1.25',
+                }}
+                title={title}
+              >
+                {title}
+              </div>
+              <div
+                style={{
+                  fontSize: '9.5px',
+                  fontWeight: '500',
+                  color: 'rgba(255, 255, 255, 0.65)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  marginTop: '1px',
+                }}
+                title={artist}
+              >
+                {artist}
+              </div>
+            </div>
+
+            {/* Mini Progress */}
+            <div style={{ width: '100%', height: '3px', borderRadius: '2px', backgroundColor: 'rgba(255, 255, 255, 0.15)', overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
+                  height: '100%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.75)',
+                  borderRadius: '2px',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+
+            {/* Mini Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <button
+                data-interactive="true"
+                style={smallControlBtnStyle}
+                onClick={(e) => handleControl('previous', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title="Previous"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </svg>
-              </div>
-            )}
+              </button>
+              <button
+                data-interactive="true"
+                style={smallPlayPauseBtnStyle}
+                onClick={(e) => handleControl('togglePlayPause', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title={isPlaying && !isPaused ? 'Pause' : 'Play'}
+              >
+                {isPlaying && !isPaused ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#000000">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#000000">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
+              </button>
+              <button
+                data-interactive="true"
+                style={smallControlBtnStyle}
+                onClick={(e) => handleControl('next', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title="Next"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                </svg>
+              </button>
+            </div>
           </div>
-
-          {/* Song Metadata */}
-          <div style={metaContainerStyle}>
-            <div
-              style={titleStyle}
-              title={isPlaying ? data.title : (error ? 'Widget Error' : 'Nothing Playing')}
-            >
-              {isPlaying ? data.title : (error ? 'Widget Error' : 'Nothing Playing')}
+        ) : sizePreset === 'large' ? (
+          /* ================================================= */
+          /* LARGE PRESET (Large Album Art 268x268, 300x~435) */
+          /* ================================================= */
+          <div style={largeCardStyle}>
+            {/* Big 268x268 Album Art */}
+            <div style={largeArtworkContainerStyle}>
+              {isPlaying && data?.artwork ? (
+                <img src={data.artwork} alt="Album Art" style={artworkImageStyle} />
+              ) : (
+                <div style={{ ...artworkFallbackStyle, backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                  </svg>
+                </div>
+              )}
             </div>
 
-            <div
-              style={artistStyle}
-              title={isPlaying ? (data.artist || 'Unknown Artist') : (error ? error : 'Playback Idle')}
-            >
-              {isPlaying ? (data.artist || 'Unknown Artist') : (error ? error : 'Playback Idle')}
+            {/* Metadata */}
+            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div
+                style={{
+                  fontSize: '15px',
+                  fontWeight: '700',
+                  color: '#FFFFFF',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  letterSpacing: '-0.3px',
+                  lineHeight: '1.25',
+                }}
+                title={title}
+              >
+                {title}
+              </div>
+              <div
+                style={{
+                  fontSize: '12.5px',
+                  fontWeight: '500',
+                  color: 'rgba(255, 255, 255, 0.72)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  marginTop: '2px',
+                }}
+                title={artist}
+              >
+                {artist}
+              </div>
+              {isPlaying && album && album !== title ? (
+                <div
+                  style={{
+                    fontSize: '11px',
+                    color: 'rgba(255, 255, 255, 0.42)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    marginTop: '1px',
+                  }}
+                  title={album}
+                >
+                  {album}
+                </div>
+              ) : (
+                <div style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.28)', marginTop: '1px' }}>
+                  {isPlaying ? '' : (error ? 'Check connection' : 'No track active')}
+                </div>
+              )}
             </div>
 
-            {isPlaying && data.album && data.album !== data.title ? (
-              <div style={albumStyle} title={data.album}>
-                {data.album}
+            {/* Progress Bar */}
+            <div style={progressSectionStyle}>
+              <div style={progressBarTrackStyle}>
+                <div
+                  style={{
+                    ...progressBarFillStyle,
+                    width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
+                  }}
+                />
               </div>
-            ) : (
-              <div style={{ ...albumStyle, opacity: 0.5 }}>
-                {isPlaying ? '' : (error ? 'Check connection' : 'No track active')}
+              <div style={progressTimesStyle}>
+                <span>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
+                <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
               </div>
-            )}
-          </div>
-        </div>
+            </div>
 
-        {/* Middle Section: Progress Bar */}
-        <div style={progressSectionStyle}>
-          <div style={progressBarTrackStyle}>
+            {/* Large Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginTop: '2px' }}>
+              <button
+                data-interactive="true"
+                style={{ ...controlBtnStyle, width: '34px', height: '34px' }}
+                onClick={(e) => handleControl('previous', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title="Previous Track"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                </svg>
+              </button>
+              <button
+                data-interactive="true"
+                style={{ ...playPauseBtnStyle, width: '40px', height: '40px' }}
+                onClick={(e) => handleControl('togglePlayPause', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title={isPlaying && !isPaused ? 'Pause' : 'Play'}
+              >
+                {isPlaying && !isPaused ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#000000">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#000000">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
+              </button>
+              <button
+                data-interactive="true"
+                style={{ ...controlBtnStyle, width: '34px', height: '34px' }}
+                onClick={(e) => handleControl('next', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title="Next Track"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* =================================== */
+          /* MEDIUM PRESET (Standard Card, 300x154) */
+          /* =================================== */
+          <div style={cardStyle}>
+            {/* Top Section: Artwork + Info */}
+            <div style={topRowStyle}>
+              <div style={artworkContainerStyle}>
+                {isPlaying && data?.artwork ? (
+                  <img src={data.artwork} alt="Album Art" style={artworkImageStyle} />
+                ) : (
+                  <div style={artworkFallbackStyle}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                      <circle cx="18" cy="16" r="3" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+
+              <div style={metaContainerStyle}>
+                <div style={titleStyle} title={title}>
+                  {title}
+                </div>
+                <div style={artistStyle} title={artist}>
+                  {artist}
+                </div>
+                {isPlaying && album && album !== title ? (
+                  <div style={albumStyle} title={album}>
+                    {album}
+                  </div>
+                ) : (
+                  <div style={{ ...albumStyle, opacity: 0.5 }}>
+                    {isPlaying ? '' : (error ? 'Check connection' : 'No track active')}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Middle Section: Progress Bar */}
+            <div style={progressSectionStyle}>
+              <div style={progressBarTrackStyle}>
+                <div
+                  style={{
+                    ...progressBarFillStyle,
+                    width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
+                  }}
+                />
+              </div>
+              <div style={progressTimesStyle}>
+                <span>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
+                <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
+              </div>
+            </div>
+
+            {/* Bottom Section: Media Controls */}
+            <div style={controlsRowStyle}>
+              <button
+                data-interactive="true"
+                style={controlBtnStyle}
+                onClick={(e) => handleControl('previous', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title="Previous Track"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                </svg>
+              </button>
+              <button
+                data-interactive="true"
+                style={playPauseBtnStyle}
+                onClick={(e) => handleControl('togglePlayPause', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title={isPlaying && !isPaused ? 'Pause' : 'Play'}
+              >
+                {isPlaying && !isPaused ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
+              </button>
+              <button
+                data-interactive="true"
+                style={controlBtnStyle}
+                onClick={(e) => handleControl('next', e)}
+                onMouseDown={(e) => e.stopPropagation()}
+                title="Next Track"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Right-Click Context Menu & Dismissal Overlay */}
+      {contextMenu && (
+        <React.Fragment>
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '100vw',
+              height: '100vh',
+              zIndex: 9998,
+              background: 'transparent',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              dispatch({ type: 'CLOSE_CONTEXT_MENU' });
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dispatch({ type: 'CLOSE_CONTEXT_MENU' });
+            }}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              top: `${contextMenu.y}px`,
+              left: `${contextMenu.x}px`,
+              zIndex: 9999,
+              backgroundColor: 'rgba(24, 24, 28, 0.94)',
+              backdropFilter: 'blur(30px) saturate(200%)',
+              WebkitBackdropFilter: 'blur(30px) saturate(200%)',
+              border: '1px solid rgba(255, 255, 255, 0.14)',
+              borderRadius: '13px',
+              padding: '5px',
+              boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.4)',
+              minWidth: '165px',
+              color: '#ffffff',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
             <div
               style={{
-                ...progressBarFillStyle,
-                width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
+                fontSize: '9.5px',
+                fontWeight: '700',
+                color: 'rgba(255, 255, 255, 0.45)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.6px',
+                padding: '4px 8px 5px 8px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                marginBottom: '4px',
               }}
-            />
+            >
+              Widget Size
+            </div>
+            {[
+              { id: 'small', label: 'Small (1:1)', icon: '▫' },
+              { id: 'medium', label: 'Medium (Standard)', icon: '▭' },
+              { id: 'large', label: 'Large (Expanded Art)', icon: '◻' },
+            ].map((item) => {
+              const isSelected = (sizePreset || 'medium') === item.id;
+              return (
+                <div
+                  key={item.id}
+                  className="nowplaying-ctx-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dispatch({ type: 'SET_SIZE_PRESET', preset: item.id });
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    borderRadius: '7px',
+                    fontSize: '11.5px',
+                    fontWeight: isSelected ? '600' : '400',
+                    color: isSelected ? '#FFFFFF' : 'rgba(255, 255, 255, 0.82)',
+                    backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
+                    cursor: 'pointer',
+                    margin: '1px 0',
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ opacity: 0.5, fontSize: '10px' }}>{item.icon}</span>
+                    <span>{item.label}</span>
+                  </span>
+                  {isSelected && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div style={progressTimesStyle}>
-            <span>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
-            <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
-          </div>
-        </div>
-
-        {/* Bottom Section: Media Controls */}
-        <div style={controlsRowStyle}>
-          {/* Previous Button */}
-          <button
-            data-interactive="true"
-            style={controlBtnStyle}
-            onClick={(e) => handleControl('previous', e)}
-            onMouseDown={(e) => e.stopPropagation()}
-            title="Previous Track"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-            </svg>
-          </button>
-
-          {/* Play / Pause Toggle Button */}
-          <button
-            data-interactive="true"
-            style={playPauseBtnStyle}
-            onClick={(e) => handleControl('togglePlayPause', e)}
-            onMouseDown={(e) => e.stopPropagation()}
-            title={isPlaying && !isPaused ? 'Pause' : 'Play'}
-          >
-            {isPlaying && !isPaused ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
-                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            )}
-          </button>
-
-          {/* Next Button */}
-          <button
-            data-interactive="true"
-            style={controlBtnStyle}
-            onClick={(e) => handleControl('next', e)}
-            onMouseDown={(e) => e.stopPropagation()}
-            title="Next Track"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    </div>
+        </React.Fragment>
+      )}
+    </React.Fragment>
   );
 };
 
@@ -369,10 +791,22 @@ export const className = `
   button:active {
     transform: scale(0.88) !important;
   }
+
+  .nowplaying-ctx-item {
+    transition: background-color 0.1s ease, color 0.1s ease;
+  }
+  .nowplaying-ctx-item:hover {
+    background-color: rgba(255, 255, 255, 0.18) !important;
+    color: #ffffff !important;
+  }
+  .nowplaying-ctx-item:active {
+    background-color: rgba(255, 255, 255, 0.25) !important;
+  }
 `;
 
-// Styles
+// Styles - Medium (Standard)
 const cardStyle = {
+  position: 'relative',
   display: 'flex',
   flexDirection: 'column',
   gap: '10px',
@@ -384,8 +818,101 @@ const cardStyle = {
   boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3)',
   border: '1px solid rgba(255, 255, 255, 0.12)',
   width: '300px',
-  minWidth: '300px',
   boxSizing: 'border-box',
+};
+
+// Styles - Small (1:1 Ratio, 154x154)
+const smallCardStyle = {
+  position: 'relative',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  width: '154px',
+  height: '154px',
+  padding: '12px 10px 10px 10px',
+  borderRadius: '22px',
+  backgroundColor: 'rgba(24, 24, 28, 0.88)',
+  backdropFilter: 'blur(30px) saturate(190%)',
+  WebkitBackdropFilter: 'blur(30px) saturate(190%)',
+  boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3)',
+  border: '1px solid rgba(255, 255, 255, 0.12)',
+  boxSizing: 'border-box',
+  overflow: 'hidden',
+};
+
+const smallArtworkContainerStyle = {
+  position: 'relative',
+  width: '56px',
+  height: '56px',
+  borderRadius: '12px',
+  overflow: 'hidden',
+  flexShrink: 0,
+  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.45)',
+  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+};
+
+const smallControlBtnStyle = {
+  background: 'rgba(255, 255, 255, 0.08)',
+  border: '1px solid rgba(255, 255, 255, 0.1)',
+  color: 'rgba(255, 255, 255, 0.85)',
+  width: '24px',
+  height: '24px',
+  borderRadius: '50%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+  outline: 'none',
+  padding: 0,
+  transition: 'background 0.15s ease, transform 0.1s ease',
+};
+
+const smallPlayPauseBtnStyle = {
+  background: '#FFFFFF',
+  border: 'none',
+  color: '#000000',
+  width: '28px',
+  height: '28px',
+  borderRadius: '50%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+  outline: 'none',
+  padding: 0,
+  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.35)',
+  transition: 'transform 0.1s ease, filter 0.15s ease',
+};
+
+// Styles - Large (Expanded Cover Art)
+const largeCardStyle = {
+  position: 'relative',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '12px',
+  backgroundColor: 'rgba(24, 24, 28, 0.88)',
+  backdropFilter: 'blur(30px) saturate(190%)',
+  WebkitBackdropFilter: 'blur(30px) saturate(190%)',
+  padding: '16px',
+  borderRadius: '24px',
+  boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.35)',
+  border: '1px solid rgba(255, 255, 255, 0.12)',
+  width: '300px',
+  boxSizing: 'border-box',
+};
+
+const largeArtworkContainerStyle = {
+  position: 'relative',
+  width: '268px',
+  height: '268px',
+  borderRadius: '16px',
+  overflow: 'hidden',
+  flexShrink: 0,
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
 };
 
 const topRowStyle = {
