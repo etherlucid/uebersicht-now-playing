@@ -502,39 +502,126 @@ export const render = (state, dispatch) => {
     );
   };
 
-  const renderStreamCarousel = (isSmall = false) => {
+  const renderAppIcon = (appName, size = 14) => {
+    if (!appName) return null;
+    const name = appName.toLowerCase();
+
+    let iconSvg = null;
+    if (name.includes('youtube') || name.includes('ytmusic')) {
+      iconSvg = (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#ea6962" />
+          <circle cx="12" cy="12" r="6.2" fill="none" stroke="#FFFFFF" strokeWidth="1.8" />
+          <polygon points="10.5,9.2 15,12 10.5,14.8" fill="#FFFFFF" />
+        </svg>
+      );
+    } else if (name.includes('spotify')) {
+      iconSvg = (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#78b856" />
+          <path d="M7 9.5c3.2-.6 6.8-.4 10 1.1M7.8 12.4c2.8-.5 5.8-.3 8.2 1M8.5 15.2c2.4-.4 4.8-.2 6.8.8" stroke="#18181c" strokeWidth="1.9" strokeLinecap="round" fill="none" />
+        </svg>
+      );
+    } else if (name.includes('apple') || name === 'music') {
+      iconSvg = (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#fa586a" />
+          <path d="M11.5 6.5v8.2c-.4-.2-.9-.3-1.5-.3-1.6 0-3 1.2-3 2.7s1.4 2.7 3 2.7 3-1.2 3-2.7V9.5h3.5v-3h-5z" fill="#FFFFFF" />
+        </svg>
+      );
+    } else if (name.includes('firefox')) {
+      iconSvg = (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#e66000" />
+          <path d="M12 4.5a7.5 7.5 0 0 0-7.5 7.5c0 4.1 3.4 7.5 7.5 7.5 3.8 0 6.9-2.8 7.4-6.6-.4.5-.8.8-1.3 1.1-1.4.8-3 .4-3.9-.8-.7-.8-.8-1.9-.3-2.7.4-.7.9-1 1.7-1.2-.8-.3-1.5-.3-2.2 0-1.1.5-1.9 1.6-1.9 2.8 0 .7.3 1.3.7 1.8-1.4-.4-2.4-1.6-2.4-3 0-1 .5-2.1 1.3-2.6.5-.4 1-.6 1.6-.7-.8-.8-1.1-1.7-1.1-2.7 0-.2 0-.5.1-.7.7-.9 1.6-1.6 2.5-1.9z" fill="#ffcb00" />
+        </svg>
+      );
+    } else if (name.includes('safari')) {
+      iconSvg = (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#0066cc" />
+          <polygon points="15 8.5 12.8 12.8 8.5 15 10.8 10.8" fill="#FFFFFF" />
+          <polygon points="8.5 15 12.8 12.8 10.8 10.8" fill="#ea6962" />
+        </svg>
+      );
+    } else if (name.includes('chrome')) {
+      iconSvg = (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#fbb829" />
+          <circle cx="12" cy="12" r="5" fill="#FFFFFF" />
+          <circle cx="12" cy="12" r="3.6" fill="#4285f4" />
+        </svg>
+      );
+    } else {
+      iconSvg = (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="11" fill="rgba(255, 255, 255, 0.16)" />
+          <path d="M9 16V7l8-1.5v9" stroke="rgba(255,255,255,0.9)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="7.5" cy="16" r="2" fill="rgba(255,255,255,0.9)" />
+          <circle cx="15.5" cy="14.5" r="2" fill="rgba(255,255,255,0.9)" />
+        </svg>
+      );
+    }
+
+    return (
+      <div
+        title={appName}
+        data-interactive="true"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '2px 4px',
+          borderRadius: '7px',
+          backgroundColor: 'rgba(255, 255, 255, 0.08)',
+          border: '1px solid rgba(255, 255, 255, 0.12)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          boxShadow: '0 2px 6px rgba(0, 0, 0, 0.3)',
+          cursor: 'default',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {iconSvg}
+      </div>
+    );
+  };
+
+  const renderStreamCarousel = () => {
     if (!streams || streams.length <= 1) return null;
 
-    const btnSize = isSmall ? '20px' : '24px';
-    const chevronSize = isSmall ? 10 : 13;
-    const dotHeight = isSmall ? 5 : 6;
-    const dotActiveWidth = isSmall ? 14 : 18;
-    const dotInactiveWidth = isSmall ? 5 : 6;
+    const btnSize = '20px';
+    const chevronSize = 11;
+    const dotHeight = 5;
+    const dotActiveWidth = 14;
+    const dotInactiveWidth = 5;
 
     return (
       <div
         data-interactive="true"
         style={{
           display: 'flex',
-          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
           userSelect: 'none',
           WebkitUserSelect: 'none',
-          margin: isSmall ? '1px auto' : '2px auto',
+          margin: '-4px auto -2px auto',
           width: '100%',
         }}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Symmetric, fixed-structure carousel pill */}
+        {/* Symmetric, compact carousel pill */}
         <div
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: isSmall ? '6px' : '8px',
-            padding: isSmall ? '2px 6px' : '3px 8px',
+            gap: '6px',
+            padding: '2px 7px',
             borderRadius: '14px',
             backgroundColor: 'rgba(255, 255, 255, 0.08)',
             border: '1px solid rgba(255, 255, 255, 0.12)',
@@ -629,27 +716,6 @@ export const render = (state, dispatch) => {
             </svg>
           </button>
         </div>
-
-        {/* Stable Sub-Label below the pill: shows app name & stream count */}
-        <div
-          style={{
-            fontSize: isSmall ? '8.5px' : '9.5px',
-            fontWeight: '600',
-            color: 'rgba(255, 255, 255, 0.55)',
-            textAlign: 'center',
-            letterSpacing: '0.2px',
-            lineHeight: '1.2',
-            marginTop: '2px',
-            height: isSmall ? '11px' : '13px',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            maxWidth: isSmall ? '130px' : '260px',
-          }}
-          title={`${appName} (${activeStreamIndex + 1}/${streams.length})`}
-        >
-          {appName ? `${appName} (${activeStreamIndex + 1}/${streams.length})` : `Stream ${activeStreamIndex + 1} of ${streams.length}`}
-        </div>
       </div>
     );
   };
@@ -720,6 +786,11 @@ export const render = (state, dispatch) => {
           /* SMALL PRESET (~1:1 Aspect Ratio, 154x154) */
           /* ========================================= */
           <div style={smallCardStyle}>
+            {appName && (
+              <div style={{ position: 'absolute', top: '9px', right: '9px', zIndex: 10 }}>
+                {renderAppIcon(appName, 11)}
+              </div>
+            )}
             {/* Artwork 56x56 */}
             <div style={smallArtworkContainerStyle}>
               {isPlaying && currentStream?.artwork ? (
@@ -780,18 +851,38 @@ export const render = (state, dispatch) => {
               />
             </div>
 
-            {/* Stream Switcher (if multiple streams) */}
-            {renderStreamCarousel(true)}
-
-            {/* Mini Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
-              {renderDislikeBtn({ width: '20px', height: '20px' }, 11)}
+            {/* Mini Controls: Stream switching outer chevrons on both sides when multiple streams exist */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: streams.length > 1 ? '6px' : '10px', width: '100%' }}>
+              {streams.length > 1 && (
+                <button
+                  data-interactive="true"
+                  style={{
+                    ...smallControlBtnStyle,
+                    width: '20px',
+                    height: '20px',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    color: 'rgba(255, 255, 255, 0.65)',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const nextIdx = (activeStreamIndex - 1 + streams.length) % streams.length;
+                    dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  title={`Previous stream (${((activeStreamIndex - 1 + streams.length) % streams.length) + 1}/${streams.length})`}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                </button>
+              )}
               <button
                 data-interactive="true"
                 style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
                 onClick={(e) => handleControl('previous', e)}
                 onMouseDown={(e) => e.stopPropagation()}
-                title="Previous"
+                title="Previous Track"
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
@@ -819,13 +910,36 @@ export const render = (state, dispatch) => {
                 style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
                 onClick={(e) => handleControl('next', e)}
                 onMouseDown={(e) => e.stopPropagation()}
-                title="Next"
+                title="Next Track"
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
-              {renderLikeBtn({ width: '20px', height: '20px' }, 11)}
+              {streams.length > 1 && (
+                <button
+                  data-interactive="true"
+                  style={{
+                    ...smallControlBtnStyle,
+                    width: '20px',
+                    height: '20px',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    color: 'rgba(255, 255, 255, 0.65)',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const nextIdx = (activeStreamIndex + 1) % streams.length;
+                    dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  title={`Next stream (${((activeStreamIndex + 1) % streams.length) + 1}/${streams.length})`}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
         ) : sizePreset === 'large' ? (
@@ -844,6 +958,11 @@ export const render = (state, dispatch) => {
                     <circle cx="6" cy="18" r="3" />
                     <circle cx="18" cy="16" r="3" />
                   </svg>
+                </div>
+              )}
+              {appName && (
+                <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 5 }}>
+                  {renderAppIcon(appName, 14)}
                 </div>
               )}
             </div>
@@ -917,10 +1036,10 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Stream Switcher (if multiple streams) */}
-            {renderStreamCarousel(false)}
+            {renderStreamCarousel()}
 
             {/* Large Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', marginTop: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px' }}>
               {renderDislikeBtn({ width: '30px', height: '30px' }, 15)}
               <button
                 data-interactive="true"
@@ -969,6 +1088,11 @@ export const render = (state, dispatch) => {
           /* MEDIUM PRESET (Standard Card, 300x154) */
           /* =================================== */
           <div style={cardStyle}>
+            {appName && (
+              <div style={{ position: 'absolute', top: '12px', right: '14px', zIndex: 10 }}>
+                {renderAppIcon(appName, 14)}
+              </div>
+            )}
             {/* Top Section: Artwork + Info */}
             <div style={topRowStyle}>
               <div style={artworkContainerStyle}>
@@ -1021,7 +1145,7 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Stream Switcher (if multiple streams) */}
-            {renderStreamCarousel(false)}
+            {renderStreamCarousel()}
 
             {/* Bottom Section: Media Controls */}
             <div style={{ ...controlsRowStyle, gap: '12px' }}>
@@ -1351,6 +1475,7 @@ const metaContainerStyle = {
   flex: 1,
   minWidth: 0,
   overflow: 'hidden',
+  paddingRight: '22px',
 };
 
 const titleStyle = {
@@ -1419,7 +1544,6 @@ const controlsRowStyle = {
   alignItems: 'center',
   justifyContent: 'center',
   gap: '16px',
-  marginTop: '2px',
 };
 
 const controlBtnStyle = {
