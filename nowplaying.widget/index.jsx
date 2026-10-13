@@ -953,7 +953,7 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Large Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '-4px' }}>
               {renderStreamChevron('left', { width: '26px', height: '26px' }, 12)}
               {renderDislikeBtn({ width: '30px', height: '30px' }, 15)}
               <button
@@ -1062,7 +1062,7 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Bottom Section: Media Controls */}
-            <div style={{ ...controlsRowStyle, gap: '8px' }}>
+            <div style={{ ...controlsRowStyle, gap: '8px', marginTop: '-4px' }}>
               {renderStreamChevron('left', { width: '22px', height: '22px' }, 10)}
               {renderDislikeBtn({ width: '26px', height: '26px' }, 13)}
               <button
@@ -1245,7 +1245,7 @@ const cardStyle = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
-  gap: '10px',
+  gap: '8px',
   backgroundColor: 'rgba(24, 24, 28, 0.85)',
   backdropFilter: 'blur(30px) saturate(190%)',
   WebkitBackdropFilter: 'blur(30px) saturate(190%)',
@@ -1327,7 +1327,7 @@ const largeCardStyle = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
-  gap: '12px',
+  gap: '9px',
   backgroundColor: 'rgba(24, 24, 28, 0.88)',
   backdropFilter: 'blur(30px) saturate(190%)',
   WebkitBackdropFilter: 'blur(30px) saturate(190%)',
@@ -1428,7 +1428,7 @@ const albumStyle = {
 const progressSectionStyle = {
   display: 'flex',
   flexDirection: 'column',
-  gap: '4px',
+  gap: '2px',
   padding: '0 2px',
 };
 
@@ -1450,10 +1450,12 @@ const progressBarFillStyle = {
 const progressTimesStyle = {
   display: 'flex',
   justifyContent: 'space-between',
-  fontSize: '10px',
+  fontSize: '9.5px',
   color: 'rgba(255, 255, 255, 0.45)',
   fontWeight: '500',
   fontVariantNumeric: 'tabular-nums',
+  lineHeight: '1',
+  marginTop: '2px',
 };
 
 const controlsRowStyle = {
