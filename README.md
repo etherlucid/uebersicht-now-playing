@@ -1,76 +1,57 @@
-# macOS Übersicht Widgets
+# uebersicht-now-playing
 
-Minimal, glassmorphic desktop widgets for [Übersicht](https://tracesof.net/uebersicht/) on macOS.
+A minimal, glassmorphic desktop Now Playing widget for [Übersicht](https://tracesof.net/uebersicht/) on macOS.
 
----
-
-## 1. `nowplaying.widget`
-
-Displays currently playing audio on macOS (Spotify, Apple Music, YouTube Music, web browsers, local media players).
-
-### Features
-- Track title, artist, album, cover art, and progress bar.
-- On-widget playback controls (previous, play/pause, next) with 0ms optimistic response.
-- Draggable anywhere on screen with position preserved across reboots.
-- Queries macOS MediaRemote directly via `nowplaying-cli`.
+Queries macOS MediaRemote directly via `nowplaying-cli`, displaying playback metadata, album artwork, track progress, genuine application badges, and responsive controls across all native and web media apps.
 
 ---
 
-## 2. `shell.widget`
+## Features
 
-An interactive, draggable, and resizable desktop shell widget with an inherited **iTerm2 color theme**.
-
-### Features
-- **iTerm2 Theme Integration**: Automatically styled with the exact color palette (background, foreground, cursor, and full 16-color ANSI spectrum) from your iTerm2 profile.
-- **Interactive Terminal**: Type any shell command directly into the prompt (`❯`) and hit Enter to execute.
-- **PTY ANSI Engine**: Renders full-color terminal output (`fastfetch`, `git status`, `ls -G`, `top -l 1`) in rich styled text.
-- **Command History & Lifecycle**: Up/Down arrow key history, active execution state indicator, and cancel support (`Esc` / `Ctrl+C`).
-- **Draggable & Resizable**: Drag by the titlebar or window, and resize using the bottom-right grip. Position and size are preserved in `localStorage`.
-- **Zero Background Daemons**: Runs 100% inside Übersicht's standard native environment—no open ports, no listening sockets, fully enterprise EDR compliant.
-
----
-
-## 3. `cava.widget`
-
-A terminal-styled desktop audio visualizer for [CAVA](https://github.com/karlstav/cava) inheriting your iTerm2 Gruvbox theme.
-
-### Features
-- **Authentic Terminal Appearance**: Renders responsive audio frequency bars using the 8-stop vertical gradient defined in `~/.config/cava/config` (`#59cc33` base → `#cccc33` mid → `#cc3333` peak).
-- **CoreAudio Tap Integration**: Visualizes live system audio output via CoreAudio AudioTap.
-- **Draggable & Resizable**: Drag by the title bar and resize via the bottom-right corner grip. Position and dimensions persist in `localStorage`.
-- **Zero Sockets / EDR Friendly**: Uses local `/tmp` file IPC with automatic heartbeat cleanup (auto-exits when widget is hidden or Übersicht quits). No open ports or listening TCP daemons.
+- **Multi-App Media Remote**: Seamlessly detects and controls Spotify, Apple Music, YouTube Music (Safari PWA & browsers), Firefox, Chrome, Safari, and other macOS media players.
+- **Authentic macOS App Badges**: Displays genuine macOS application icons extracted directly from app bundles.
+- **Multi-Stream Carousel**: Cycle between multiple active media streams with chevrons and indicator dots. Prioritizes actively playing media and dedicated audio players.
+- **3 Size Presets**:
+  - **Small (154×154)**: Compact 1:1 square card with track art, title, artist, and compact controls.
+  - **Medium (300×154)**: Standard desktop card with full metadata, progress bar, time indicators, and rating buttons.
+  - **Large (300×435)**: Full-bleed poster card with prominent album artwork, expanded typography, and detailed playback controls.
+- **Stationary Anchor**: Right-click context menu lets you switch size presets seamlessly without shifting your configured top-left screen position.
+- **Smart Artwork Caching**: Artwork is cached per-track on disk to eliminate flicker, prevent phantom clearing, and protect web app art.
+- **Like / Dislike Ratings**: Dedicated rating controls with direct integration for YouTube Music and Apple Music.
+- **Draggable Anywhere**: Drag the card anywhere on screen; position is preserved across reboots and widget reloads in `localStorage`.
 
 ---
 
 ## Requirements
 
 - [Übersicht](https://tracesof.net/uebersicht/)
-- [nowplaying-cli](https://github.com/kirtan-shah/nowplaying-cli) (for `nowplaying.widget`):
+- [nowplaying-cli](https://github.com/kirtan-shah/nowplaying-cli):
   ```bash
   brew install nowplaying-cli
-  ```
-- [cava](https://github.com/karlstav/cava) (for `cava.widget`):
-  ```bash
-  brew install cava
   ```
 
 ---
 
-## Install
+## Installation
 
-Copy or symlink the widgets into your Übersicht widgets directory:
+1. Clone or copy the widget to your Übersicht widgets folder:
+   ```bash
+   git clone https://github.com/etherlucid/uebersicht-now-playing.git
+   cp -r uebersicht-now-playing/nowplaying.widget "$HOME/Library/Application Support/Übersicht/widgets/"
+   ```
 
-```bash
-git clone https://github.com/etherlucid/uebersicht-now-playing.git
-cp -r uebersicht-now-playing/nowplaying.widget "$HOME/Library/Application Support/Übersicht/widgets/"
-cp -r uebersicht-now-playing/shell.widget "$HOME/Library/Application Support/Übersicht/widgets/"
-cp -r uebersicht-now-playing/cava.widget "$HOME/Library/Application Support/Übersicht/widgets/"
-```
+   *Or symlink:*
+   ```bash
+   ln -s "$(pwd)/uebersicht-now-playing/nowplaying.widget" "$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget"
+   ```
 
-Or symlink:
+2. (Optional) Copy `main.css` to `~/Library/Application Support/Übersicht/widgets/main.css` for shared font/backdrop styling.
 
-```bash
-ln -s "$(pwd)/nowplaying.widget" "$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget"
-ln -s "$(pwd)/shell.widget" "$HOME/Library/Application Support/Übersicht/widgets/shell.widget"
-ln -s "$(pwd)/cava.widget" "$HOME/Library/Application Support/Übersicht/widgets/cava.widget"
-```
+3. Refresh Übersicht.
+
+---
+
+## Related Widgets
+
+- [uebersicht-cava](https://github.com/etherlucid/uebersicht-cava): Responsive desktop audio visualizer for CAVA.
+- [uebersicht-shell](https://github.com/etherlucid/uebersicht-shell): Interactive desktop terminal & fastfetch widget.
