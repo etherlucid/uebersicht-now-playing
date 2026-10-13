@@ -15,6 +15,154 @@ CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache.json"
 CACHE_RATINGS_FILE = "/tmp/nowplaying_ratings.json"
 CACHE_ART_DIR = "/tmp/nowplaying_art_cache"
 CACHE_YTMUSIC_ART_FILE = "/tmp/nowplaying_ytmusic_art.txt"
+CACHE_APP_ICON_DIR = "/tmp/nowplaying_app_icons"
+CACHE_APP_ICON_SCRIPT = "/tmp/nowplaying_get_app_icon.js"
+
+_APP_ICON_MEM_CACHE = {}
+
+JXA_APP_ICON_SCRIPT_CODE = '''ObjC.import("AppKit");
+
+function run(argv) {
+    var bundleId = argv[0] || "";
+    var appName = argv[1] || "";
+
+    var ws = $.NSWorkspace.sharedWorkspace;
+    var fm = $.NSFileManager.defaultManager;
+    var appPath = null;
+
+    function checkPath(p) {
+        if (!p) return null;
+        var str = ObjC.unwrap(p);
+        if (fm.fileExistsAtPath(str)) return str;
+        return null;
+    }
+
+    var lowerB = bundleId.toLowerCase();
+    if (bundleId && lowerB.indexOf("webkit") === -1 && lowerB.indexOf("mediaremote") === -1) {
+        var url = ws.URLForApplicationWithBundleIdentifier(bundleId);
+        if (url && url.path) {
+            appPath = checkPath(url.path);
+        }
+    }
+
+    if (!appPath && appName) {
+        try {
+            var p = ws.fullPathForApplication(appName);
+            if (p) appPath = checkPath(p);
+        } catch(e) {}
+    }
+
+    if (!appPath && appName) {
+        var home = ObjC.unwrap($.NSHomeDirectory());
+        var dirs = [
+            "/Applications",
+            "/System/Applications",
+            home + "/Applications",
+            "/System/Volumes/Preboot/Cryptexes/App/System/Applications"
+        ];
+        var candidates = [appName, appName + ".app"];
+        var lower = appName.toLowerCase();
+        if (lower.indexOf("youtube") !== -1 || lower.indexOf("yt") !== -1) {
+            candidates.push("YT Music.app", "YouTube Music.app");
+        } else if (lower.indexOf("apple") !== -1 && lower.indexOf("music") !== -1) {
+            candidates.push("Music.app");
+        }
+        for (var i = 0; i < dirs.length; i++) {
+            for (var j = 0; j < candidates.length; j++) {
+                var testP = dirs[i] + "/" + candidates[j];
+                if (fm.fileExistsAtPath(testP)) {
+                    appPath = testP;
+                    break;
+                }
+            }
+            if (appPath) break;
+        }
+    }
+
+    if (!appPath) return "";
+
+    var icon = ws.iconForFile(appPath);
+    if (!icon) return "";
+
+    var size = 64;
+    var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
+        null, size, size, 8, 4, true, false, $.NSDeviceRGBColorSpace, 0, 0
+    );
+    $.NSGraphicsContext.saveGraphicsState;
+    var ctx = $.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep);
+    $.NSGraphicsContext.setCurrentContext(ctx);
+    icon.drawInRectFromRectOperationFraction(
+        $.NSMakeRect(0, 0, size, size),
+        $.NSZeroRect,
+        $.NSCompositingOperationCopy,
+        1.0
+    );
+    $.NSGraphicsContext.restoreGraphicsState;
+
+    var pngData = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}));
+    if (!pngData) return "";
+    var b64 = pngData.base64EncodedStringWithOptions(0);
+    return "data:image/png;base64," + ObjC.unwrap(b64);
+}
+'''
+
+def get_app_icon(bundle_id, app_name):
+    bundle_id = (bundle_id or "").strip()
+    app_name = (app_name or "").strip()
+    if not bundle_id and not app_name:
+        return ""
+
+    cache_key = f"{bundle_id}___{app_name}".lower()
+    if cache_key in _APP_ICON_MEM_CACHE:
+        return _APP_ICON_MEM_CACHE[cache_key]
+
+    if not os.path.exists(CACHE_APP_ICON_DIR):
+        try:
+            os.makedirs(CACHE_APP_ICON_DIR, exist_ok=True)
+        except Exception:
+            pass
+
+    key_hash = hashlib.md5(cache_key.encode("utf-8", errors="ignore")).hexdigest()
+    cache_file = os.path.join(CACHE_APP_ICON_DIR, f"{key_hash}.txt")
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                cached_data = f.read().strip()
+                if cached_data:
+                    _APP_ICON_MEM_CACHE[cache_key] = cached_data
+                    return cached_data
+        except Exception:
+            pass
+
+    # Ensure JXA script exists
+    if not os.path.exists(CACHE_APP_ICON_SCRIPT):
+        try:
+            with open(CACHE_APP_ICON_SCRIPT, "w") as f:
+                f.write(JXA_APP_ICON_SCRIPT_CODE)
+        except Exception:
+            pass
+
+    try:
+        proc = subprocess.run(
+            ["osascript", "-l", "JavaScript", CACHE_APP_ICON_SCRIPT, bundle_id, app_name],
+            capture_output=True,
+            text=True,
+            timeout=1.5
+        )
+        out = proc.stdout.strip()
+        if out.startswith("data:image/png;base64,"):
+            try:
+                with open(cache_file, "w") as f:
+                    f.write(out)
+            except Exception:
+                pass
+            _APP_ICON_MEM_CACHE[cache_key] = out
+            return out
+    except Exception:
+        pass
+
+    _APP_ICON_MEM_CACHE[cache_key] = ""
+    return ""
 
 def find_nowplaying_cli():
     paths = [
@@ -704,6 +852,10 @@ def main():
     # Sort: actively playing first, slight bias for actual music apps, then recency
     active_streams.sort(key=stream_sort_key, reverse=True)
 
+    # Attach authentic macOS application icons
+    for s in active_streams:
+        s["appIcon"] = get_app_icon(s.get("bundleId", ""), s.get("appName", ""))
+
     # Save cache
     try:
         with open(CACHE_STREAMS_FILE, "w") as f:
@@ -733,6 +885,7 @@ def main():
         "artwork": main_stream.get("artwork", ""),
         "bundleId": main_stream.get("bundleId", ""),
         "appName": main_stream.get("appName", ""),
+        "appIcon": main_stream.get("appIcon", ""),
         "rating": main_stream.get("rating"),
         "supportsRating": main_stream.get("supportsRating", False),
         "updatedAt": main_stream.get("updatedAt", now)

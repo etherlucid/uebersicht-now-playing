@@ -426,6 +426,7 @@ export const render = (state, dispatch) => {
   const artist = isPlaying ? (currentStream.artist || 'Unknown Artist') : (error ? error : 'Playback Idle');
   const album = isPlaying ? (currentStream.album || '') : '';
   const appName = currentStream.appName || '';
+  const appIcon = currentStream.appIcon || data?.appIcon || '';
   const bundleId = currentStream.bundleId || '';
   const streamId = currentStream.id || '';
   const supportsRating = currentStream.supportsRating ?? false;
@@ -500,76 +501,98 @@ export const render = (state, dispatch) => {
     );
   };
 
-  const renderAppIcon = (appName, size = 14) => {
-    if (!appName) return null;
-    const name = appName.toLowerCase();
+  const renderAppIcon = (name, iconUrl, size = 16) => {
+    if (!name && !iconUrl) return null;
 
-    let iconSvg = null;
-    if (name.includes('youtube') || name.includes('ytmusic')) {
-      iconSvg = (
-        <svg width={size} height={size} viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="11" fill="#ea6962" />
-          <circle cx="12" cy="12" r="6.2" fill="none" stroke="#FFFFFF" strokeWidth="1.8" />
-          <polygon points="10.5,9.2 15,12 10.5,14.8" fill="#FFFFFF" />
-        </svg>
-      );
-    } else if (name.includes('spotify')) {
-      iconSvg = (
-        <svg width={size} height={size} viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="11" fill="#78b856" />
-          <path d="M7 9.5c3.2-.6 6.8-.4 10 1.1M7.8 12.4c2.8-.5 5.8-.3 8.2 1M8.5 15.2c2.4-.4 4.8-.2 6.8.8" stroke="#18181c" strokeWidth="1.9" strokeLinecap="round" fill="none" />
-        </svg>
-      );
-    } else if (name.includes('apple') || name === 'music') {
-      iconSvg = (
-        <svg width={size} height={size} viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="11" fill="#fa586a" />
-          <path d="M11.5 6.5v8.2c-.4-.2-.9-.3-1.5-.3-1.6 0-3 1.2-3 2.7s1.4 2.7 3 2.7 3-1.2 3-2.7V9.5h3.5v-3h-5z" fill="#FFFFFF" />
-        </svg>
-      );
-    } else if (name.includes('firefox')) {
-      iconSvg = (
-        <svg width={size} height={size} viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="11" fill="#e66000" />
-          <path d="M12 4.5a7.5 7.5 0 0 0-7.5 7.5c0 4.1 3.4 7.5 7.5 7.5 3.8 0 6.9-2.8 7.4-6.6-.4.5-.8.8-1.3 1.1-1.4.8-3 .4-3.9-.8-.7-.8-.8-1.9-.3-2.7.4-.7.9-1 1.7-1.2-.8-.3-1.5-.3-2.2 0-1.1.5-1.9 1.6-1.9 2.8 0 .7.3 1.3.7 1.8-1.4-.4-2.4-1.6-2.4-3 0-1 .5-2.1 1.3-2.6.5-.4 1-.6 1.6-.7-.8-.8-1.1-1.7-1.1-2.7 0-.2 0-.5.1-.7.7-.9 1.6-1.6 2.5-1.9z" fill="#ffcb00" />
-        </svg>
-      );
-    } else if (name.includes('safari')) {
-      iconSvg = (
-        <svg width={size} height={size} viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="11" fill="#0066cc" />
-          <polygon points="15 8.5 12.8 12.8 8.5 15 10.8 10.8" fill="#FFFFFF" />
-          <polygon points="8.5 15 12.8 12.8 10.8 10.8" fill="#ea6962" />
-        </svg>
-      );
-    } else if (name.includes('chrome')) {
-      iconSvg = (
-        <svg width={size} height={size} viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="11" fill="#fbb829" />
-          <circle cx="12" cy="12" r="5" fill="#FFFFFF" />
-          <circle cx="12" cy="12" r="3.6" fill="#4285f4" />
-        </svg>
+    let iconContent = null;
+    if (iconUrl) {
+      iconContent = (
+        <img
+          src={iconUrl}
+          alt={name || 'App'}
+          width={size}
+          height={size}
+          draggable={false}
+          style={{
+            width: `${size}px`,
+            height: `${size}px`,
+            objectFit: 'contain',
+            display: 'block',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            WebkitUserDrag: 'none',
+            pointerEvents: 'none',
+          }}
+        />
       );
     } else {
-      iconSvg = (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="11" fill="rgba(255, 255, 255, 0.16)" />
-          <path d="M9 16V7l8-1.5v9" stroke="rgba(255,255,255,0.9)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="7.5" cy="16" r="2" fill="rgba(255,255,255,0.9)" />
-          <circle cx="15.5" cy="14.5" r="2" fill="rgba(255,255,255,0.9)" />
-        </svg>
-      );
+      const lower = (name || '').toLowerCase();
+      if (lower.includes('youtube') || lower.includes('ytmusic')) {
+        iconContent = (
+          <svg width={size} height={size} viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="11" fill="#ea6962" />
+            <circle cx="12" cy="12" r="6.2" fill="none" stroke="#FFFFFF" strokeWidth="1.8" />
+            <polygon points="10.5,9.2 15,12 10.5,14.8" fill="#FFFFFF" />
+          </svg>
+        );
+      } else if (lower.includes('spotify')) {
+        iconContent = (
+          <svg width={size} height={size} viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="11" fill="#78b856" />
+            <path d="M7 9.5c3.2-.6 6.8-.4 10 1.1M7.8 12.4c2.8-.5 5.8-.3 8.2 1M8.5 15.2c2.4-.4 4.8-.2 6.8.8" stroke="#18181c" strokeWidth="1.9" strokeLinecap="round" fill="none" />
+          </svg>
+        );
+      } else if (lower.includes('apple') || lower === 'music') {
+        iconContent = (
+          <svg width={size} height={size} viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="11" fill="#fa586a" />
+            <path d="M11.5 6.5v8.2c-.4-.2-.9-.3-1.5-.3-1.6 0-3 1.2-3 2.7s1.4 2.7 3 2.7 3-1.2 3-2.7V9.5h3.5v-3h-5z" fill="#FFFFFF" />
+          </svg>
+        );
+      } else if (lower.includes('firefox')) {
+        iconContent = (
+          <svg width={size} height={size} viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="11" fill="#e66000" />
+            <path d="M12 4.5a7.5 7.5 0 0 0-7.5 7.5c0 4.1 3.4 7.5 7.5 7.5 3.8 0 6.9-2.8 7.4-6.6-.4.5-.8.8-1.3 1.1-1.4.8-3 .4-3.9-.8-.7-.8-.8-1.9-.3-2.7.4-.7.9-1 1.7-1.2-.8-.3-1.5-.3-2.2 0-1.1.5-1.9 1.6-1.9 2.8 0 .7.3 1.3.7 1.8-1.4-.4-2.4-1.6-2.4-3 0-1 .5-2.1 1.3-2.6.5-.4 1-.6 1.6-.7-.8-.8-1.1-1.7-1.1-2.7 0-.2 0-.5.1-.7.7-.9 1.6-1.6 2.5-1.9z" fill="#ffcb00" />
+          </svg>
+        );
+      } else if (lower.includes('safari')) {
+        iconContent = (
+          <svg width={size} height={size} viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="11" fill="#0066cc" />
+            <polygon points="15 8.5 12.8 12.8 8.5 15 10.8 10.8" fill="#FFFFFF" />
+            <polygon points="8.5 15 12.8 12.8 10.8 10.8" fill="#ea6962" />
+          </svg>
+        );
+      } else if (lower.includes('chrome')) {
+        iconContent = (
+          <svg width={size} height={size} viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="11" fill="#fbb829" />
+            <circle cx="12" cy="12" r="5" fill="#FFFFFF" />
+            <circle cx="12" cy="12" r="3.6" fill="#4285f4" />
+          </svg>
+        );
+      } else {
+        iconContent = (
+          <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="11" fill="rgba(255, 255, 255, 0.16)" />
+            <path d="M9 16V7l8-1.5v9" stroke="rgba(255,255,255,0.9)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="7.5" cy="16" r="2" fill="rgba(255,255,255,0.9)" />
+            <circle cx="15.5" cy="14.5" r="2" fill="rgba(255,255,255,0.9)" />
+          </svg>
+        );
+      }
     }
 
     return (
       <div
-        title={appName}
+        title={name}
         data-interactive="true"
         style={{
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '2px 4px',
+          padding: size <= 14 ? '2px' : '3px',
           borderRadius: '7px',
           backgroundColor: 'rgba(255, 255, 255, 0.08)',
           border: '1px solid rgba(255, 255, 255, 0.12)',
@@ -583,7 +606,7 @@ export const render = (state, dispatch) => {
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {iconSvg}
+        {iconContent}
       </div>
     );
   };
@@ -737,9 +760,9 @@ export const render = (state, dispatch) => {
           /* SMALL PRESET (~1:1 Aspect Ratio, 154x154) */
           /* ========================================= */
           <div style={smallCardStyle}>
-            {appName && (
+            {(appName || appIcon) && (
               <div style={{ position: 'absolute', top: '9px', right: '9px', zIndex: 10 }}>
-                {renderAppIcon(appName, 11)}
+                {renderAppIcon(appName, appIcon, 13)}
               </div>
             )}
             {/* Artwork 56x56 */}
@@ -866,9 +889,9 @@ export const render = (state, dispatch) => {
                   </svg>
                 </div>
               )}
-              {appName && (
+              {(appName || appIcon) && (
                 <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 5 }}>
-                  {renderAppIcon(appName, 14)}
+                  {renderAppIcon(appName, appIcon, 16)}
                 </div>
               )}
             </div>
@@ -994,9 +1017,9 @@ export const render = (state, dispatch) => {
           /* MEDIUM PRESET (Standard Card, 300x154) */
           /* =================================== */
           <div style={cardStyle}>
-            {appName && (
+            {(appName || appIcon) && (
               <div style={{ position: 'absolute', top: '12px', right: '14px', zIndex: 10 }}>
-                {renderAppIcon(appName, 14)}
+                {renderAppIcon(appName, appIcon, 16)}
               </div>
             )}
             {/* Top Section: Artwork + Info */}
