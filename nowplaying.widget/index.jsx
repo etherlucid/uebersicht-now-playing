@@ -609,8 +609,9 @@ export const render = (state, dispatch) => {
           justifyContent: 'center',
           userSelect: 'none',
           WebkitUserSelect: 'none',
-          margin: '-4px auto -2px auto',
+          margin: '-16px auto -4px auto',
           width: '100%',
+          zIndex: 2,
         }}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
