@@ -509,48 +509,6 @@ def is_proc_playing_audio(proc_name):
     except Exception:
         return False
 
-def get_firefox_stream():
-    if not (is_process_running("firefox") or is_process_running("Firefox")):
-        return None
-    script = '''
-tell application "System Events"
-  try
-    tell process "firefox"
-      set winList to name of windows
-      return item 1 of winList
-    end tell
-  on error
-    return "none"
-  end try
-end tell
-'''
-    try:
-        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.0)
-        win_title = res.stdout.strip()
-        if win_title and win_title != "none":
-            title = win_title
-            for suffix in [" — Mozilla Firefox", " - Mozilla Firefox", " — Firefox", " - Firefox"]:
-                if suffix in title:
-                    title = title.split(suffix)[0].strip()
-            # Accurately detect if Firefox is actively outputting sound
-            is_playing = 1 if is_proc_playing_audio("firefox") else 0
-            return {
-                "id": "firefox",
-                "title": title,
-                "artist": "",
-                "album": "",
-                "duration": 0.0,
-                "elapsed": 0.0,
-                "rate": is_playing,
-                "artwork": "",
-                "bundleId": "org.mozilla.firefox",
-                "appName": "Firefox",
-                "rating": None,
-                "supportsRating": False,
-                "updatedAt": round(time.time(), 3)
-            }
-    except Exception:
-        pass
 def is_dedicated_music_app(stream):
     app_name = (stream.get("appName") or "").lower()
     bundle_id = (stream.get("bundleId") or "").lower()
@@ -590,6 +548,9 @@ def main():
                     b_id = s.get("bundleId", "")
                     app_n = s.get("appName", "")
                     if is_app_running(b_id, app_n):
+                        if not is_dedicated_music_app(s):
+                            if s.get("rate") != 1 and (now - s.get("updatedAt", 0) > 300.0):
+                                continue
                         streams_map[s["id"]] = s
         except Exception:
             streams_map = {}
@@ -696,11 +657,6 @@ def main():
         if sp_stream:
             streams_map["spotify"] = sp_stream
 
-    # 5. Check Firefox if not already updated via MediaRemote
-    if "firefox" not in streams_map or (primary_stream and primary_stream["id"] != "firefox"):
-        ff_stream = get_firefox_stream()
-        if ff_stream:
-            streams_map["firefox"] = ff_stream
 
     # Filter out dead streams
     active_streams = []
