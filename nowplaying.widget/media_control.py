@@ -16,6 +16,30 @@ def send_mediaremote_command(cmd_id):
     except Exception:
         return False
 
+def find_nowplaying_cli():
+    paths = [
+        "/opt/homebrew/bin/nowplaying-cli",
+        "/usr/local/bin/nowplaying-cli",
+    ]
+    for p in paths:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return "/opt/homebrew/bin/nowplaying-cli"
+
+def get_mediaremote_client_bundle_id():
+    cli = find_nowplaying_cli()
+    if not os.path.exists(cli):
+        return ""
+    try:
+        proc = subprocess.run([cli, "get-raw"], capture_output=True, text=True, timeout=0.8)
+        stdout = proc.stdout.strip()
+        if stdout and stdout != "null":
+            data = json.loads(stdout)
+            return (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower()
+    except Exception:
+        pass
+    return ""
+
 def control_apple_music(action):
     try:
         check = subprocess.run(
@@ -233,19 +257,32 @@ def main():
     elif is_spotify:
         result = control_spotify(action)
     else:
-        # Generic MediaRemote stream (Safari, Chrome, Podcasts, VLC, etc.)
-        if action in ("toggleplaypause", "next", "previous"):
-            cmd_map = {
-                "toggleplaypause": 2, # kMRTogglePlayPause
-                "next": 4,            # kMRNextTrack
-                "previous": 5         # kMRPreviousTrack
-            }
-            cmd_id = cmd_map.get(action, 2)
-            ok = send_mediaremote_command(cmd_id)
-            result = {"success": ok}
+        # Generic MediaRemote stream (Safari, Chrome, Podcasts, VLC, Firefox, etc.)
+        # Safeguard: ensure that MediaRemote's current active client actually matches this stream!
+        # If another app (like YTMusic) is currently active, sending MRMediaRemoteSendCommand would mistakenly command it.
+        current_mr_bundle = get_mediaremote_client_bundle_id()
+        is_target_active = False
+        if bundle_id and bundle_id in current_mr_bundle:
+            is_target_active = True
+        elif app_name and app_name in current_mr_bundle:
+            is_target_active = True
+        elif not current_mr_bundle:
+            is_target_active = True
+
+        if is_target_active:
+            if action in ("toggleplaypause", "next", "previous"):
+                cmd_map = {
+                    "toggleplaypause": 2, # kMRTogglePlayPause
+                    "next": 4,            # kMRNextTrack
+                    "previous": 5         # kMRPreviousTrack
+                }
+                cmd_id = cmd_map.get(action, 2)
+                ok = send_mediaremote_command(cmd_id)
+                result = {"success": ok}
+            else:
+                result = {"success": False, "rating": None}
         else:
-            # Streams without rating capability (Safari, Chrome, etc.)
-            # Do NOT touch any other player! Do NOT toggle like/dislike!
+            # Target stream is not the active MediaRemote client; do not hijack the active player!
             result = {"success": False, "rating": None}
 
     if result.get("success") and result.get("rating") is not None and track_key:

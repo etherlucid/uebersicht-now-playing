@@ -6,12 +6,15 @@ import base64
 import subprocess
 import shutil
 import time
+import hashlib
 
 CACHE_TRACK_FILE = "/tmp/nowplaying_track.txt"
 CACHE_ART_FILE = "/tmp/nowplaying_art_data.txt"
 CACHE_STATE_FILE = "/tmp/nowplaying_state.json"
 CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache.json"
 CACHE_RATINGS_FILE = "/tmp/nowplaying_ratings.json"
+CACHE_ART_DIR = "/tmp/nowplaying_art_cache"
+CACHE_YTMUSIC_ART_FILE = "/tmp/nowplaying_ytmusic_art.txt"
 
 def find_nowplaying_cli():
     paths = [
@@ -45,62 +48,77 @@ def get_nowplaying_data():
     except Exception:
         return None
 
+def get_track_art_cache_path(track_key):
+    if not track_key:
+        return ""
+    h = hashlib.md5(track_key.encode("utf-8", errors="ignore")).hexdigest()
+    return os.path.join(CACHE_ART_DIR, f"{h}.txt")
+
 def process_artwork(data, track_key):
-    cached_track = ""
-    if os.path.exists(CACHE_TRACK_FILE):
+    if not track_key:
+        return ""
+
+    if not os.path.exists(CACHE_ART_DIR):
         try:
-            with open(CACHE_TRACK_FILE, "r") as f:
-                cached_track = f.read().strip()
+            os.makedirs(CACHE_ART_DIR, exist_ok=True)
         except Exception:
             pass
 
-    artwork_data_url = ""
+    track_cache_file = get_track_art_cache_path(track_key)
+    raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData")
 
-    if track_key != cached_track:
-        raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData")
-        if raw_art:
-            try:
-                art_bytes = base64.b64decode(raw_art)
-                tmp_in = "/tmp/nowplaying_art.tiff"
-                tmp_out = "/tmp/nowplaying_art.jpg"
-                with open(tmp_in, "wb") as f:
-                    f.write(art_bytes)
+    if raw_art and track_cache_file:
+        try:
+            art_bytes = base64.b64decode(raw_art)
+            tmp_in = "/tmp/nowplaying_art.tiff"
+            tmp_out = "/tmp/nowplaying_art.jpg"
+            with open(tmp_in, "wb") as f:
+                f.write(art_bytes)
 
-                subprocess.run(
-                    ["sips", "-Z", "160", "-s", "format", "jpeg", tmp_in, "--out", tmp_out],
-                    capture_output=True,
-                    timeout=1.0
-                )
+            subprocess.run(
+                ["sips", "-Z", "160", "-s", "format", "jpeg", tmp_in, "--out", tmp_out],
+                capture_output=True,
+                timeout=1.0
+            )
 
-                if os.path.exists(tmp_out):
-                    with open(tmp_out, "rb") as f:
-                        b64_img = base64.b64encode(f.read()).decode("ascii")
-                    artwork_data_url = f"data:image/jpeg;base64,{b64_img}"
-                    with open(CACHE_ART_FILE, "w") as f:
+            if os.path.exists(tmp_out):
+                with open(tmp_out, "rb") as f:
+                    b64_img = base64.b64encode(f.read()).decode("ascii")
+                artwork_data_url = f"data:image/jpeg;base64,{b64_img}"
+                with open(track_cache_file, "w") as f:
+                    f.write(artwork_data_url)
+                with open(CACHE_ART_FILE, "w") as f:
+                    f.write(artwork_data_url)
+                b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower()
+                if "webapp" in b_id or "safari" in b_id or "webkit" in b_id:
+                    with open(CACHE_YTMUSIC_ART_FILE, "w") as f:
                         f.write(artwork_data_url)
-            except Exception:
-                pass
-        else:
-            if os.path.exists(CACHE_ART_FILE):
-                try:
-                    os.remove(CACHE_ART_FILE)
-                except Exception:
-                    pass
-
-        try:
-            with open(CACHE_TRACK_FILE, "w") as f:
-                f.write(track_key)
+                return artwork_data_url
         except Exception:
             pass
-    else:
-        if os.path.exists(CACHE_ART_FILE):
-            try:
-                with open(CACHE_ART_FILE, "r") as f:
-                    artwork_data_url = f.read().strip()
-            except Exception:
-                pass
 
-    return artwork_data_url
+    # If raw_art was not in this payload, check if we already have it cached for this track
+    if track_cache_file and os.path.exists(track_cache_file):
+        try:
+            with open(track_cache_file, "r") as f:
+                cached_art = f.read().strip()
+                if cached_art:
+                    return cached_art
+        except Exception:
+            pass
+
+    # For YouTube Music / WebApp, fallback to dedicated YTMusic artwork cache if available
+    b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower()
+    if ("webapp" in b_id or "safari" in b_id or "webkit" in b_id) and os.path.exists(CACHE_YTMUSIC_ART_FILE):
+        try:
+            with open(CACHE_YTMUSIC_ART_FILE, "r") as f:
+                cached_yt = f.read().strip()
+                if cached_yt:
+                    return cached_yt
+        except Exception:
+            pass
+
+    return ""
 
 def is_process_running(proc_name):
     try:
@@ -336,7 +354,21 @@ end tell
 
             # Check cached artwork
             artwork_url = ""
-            if os.path.exists(CACHE_ART_FILE):
+            yt_art_key = f"{title}___{artist}___"
+            yt_cache_file = get_track_art_cache_path(yt_art_key)
+            if yt_cache_file and os.path.exists(yt_cache_file):
+                try:
+                    with open(yt_cache_file, "r") as f:
+                        artwork_url = f.read().strip()
+                except Exception:
+                    pass
+            if not artwork_url and os.path.exists(CACHE_YTMUSIC_ART_FILE):
+                try:
+                    with open(CACHE_YTMUSIC_ART_FILE, "r") as f:
+                        artwork_url = f.read().strip()
+                except Exception:
+                    pass
+            if not artwork_url and os.path.exists(CACHE_ART_FILE):
                 try:
                     with open(CACHE_ART_FILE, "r") as f:
                         artwork_url = f.read().strip()
@@ -539,7 +571,9 @@ def main():
     now = time.time()
     streams_map = {}
 
-    # Load recent cached streams (kept as long as process is running)
+    # Load recent cached streams (only dedicated music apps: YTMusic, Apple Music, Spotify)
+    # Generic browser streams (Firefox, Chrome, Safari) are NEVER kept from cache because when their
+    # media tab closes, they have no persistent session, cannot be controlled, and would hijack playback controls.
     if os.path.exists(CACHE_STREAMS_FILE):
         try:
             with open(CACHE_STREAMS_FILE, "r") as f:
@@ -547,10 +581,7 @@ def main():
                 for s in cached:
                     b_id = s.get("bundleId", "")
                     app_n = s.get("appName", "")
-                    if is_app_running(b_id, app_n):
-                        if not is_dedicated_music_app(s):
-                            if s.get("rate") != 1 and (now - s.get("updatedAt", 0) > 300.0):
-                                continue
+                    if is_dedicated_music_app(s) and is_app_running(b_id, app_n):
                         streams_map[s["id"]] = s
         except Exception:
             streams_map = {}
@@ -661,8 +692,14 @@ def main():
     # Filter out dead streams
     active_streams = []
     for s_id, s in streams_map.items():
-        if s.get("title") and s.get("title") != "null":
-            active_streams.append(s)
+        if not s.get("title") or s.get("title") == "null":
+            continue
+        # Generic browser streams (Firefox, Chrome, Safari) must be the current primary MediaRemote stream.
+        # If the user closed the tab or MediaRemote switched away, discard immediately.
+        if not is_dedicated_music_app(s):
+            if not (primary_stream and primary_stream.get("id") == s_id):
+                continue
+        active_streams.append(s)
 
     # Sort: actively playing first, slight bias for actual music apps, then recency
     active_streams.sort(key=stream_sort_key, reverse=True)
