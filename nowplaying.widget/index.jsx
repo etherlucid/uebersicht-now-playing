@@ -591,7 +591,8 @@ export const render = (state, dispatch) => {
   };
 
   const renderStreamCarousel = () => {
-    if (!streams || streams.length <= 1) return null;
+    if (!streams || streams.length === 0) return null;
+    const hasMultiple = streams.length > 1;
 
     const btnSize = '20px';
     const chevronSize = 11;
@@ -637,10 +638,10 @@ export const render = (state, dispatch) => {
               width: btnSize,
               height: btnSize,
               borderRadius: '50%',
-              background: 'rgba(255, 255, 255, 0.06)',
+              background: hasMultiple ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
               border: 'none',
-              color: 'rgba(255, 255, 255, 0.85)',
-              cursor: 'pointer',
+              color: hasMultiple ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.3)',
+              cursor: hasMultiple ? 'pointer' : 'default',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -650,10 +651,11 @@ export const render = (state, dispatch) => {
             }}
             onClick={(e) => {
               e.stopPropagation();
+              if (!hasMultiple) return;
               const nextIdx = (activeStreamIndex - 1 + streams.length) % streams.length;
               dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
             }}
-            title="Previous stream"
+            title={hasMultiple ? "Previous stream" : "Single stream active"}
           >
             <svg width={chevronSize} height={chevronSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6" />
@@ -673,11 +675,12 @@ export const render = (state, dispatch) => {
                     height: `${dotHeight}px`,
                     borderRadius: '3px',
                     backgroundColor: isActive ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)',
-                    cursor: 'pointer',
+                    cursor: hasMultiple ? 'pointer' : 'default',
                     transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!hasMultiple) return;
                     dispatch({ type: 'SET_STREAM_INDEX', index: idx });
                   }}
                   title={`${s.appName || 'Stream'} (${idx + 1}/${streams.length})`}
@@ -693,10 +696,10 @@ export const render = (state, dispatch) => {
               width: btnSize,
               height: btnSize,
               borderRadius: '50%',
-              background: 'rgba(255, 255, 255, 0.06)',
+              background: hasMultiple ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
               border: 'none',
-              color: 'rgba(255, 255, 255, 0.85)',
-              cursor: 'pointer',
+              color: hasMultiple ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.3)',
+              cursor: hasMultiple ? 'pointer' : 'default',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -706,10 +709,11 @@ export const render = (state, dispatch) => {
             }}
             onClick={(e) => {
               e.stopPropagation();
+              if (!hasMultiple) return;
               const nextIdx = (activeStreamIndex + 1) % streams.length;
               dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
             }}
-            title="Next stream"
+            title={hasMultiple ? "Next stream" : "Single stream active"}
           >
             <svg width={chevronSize} height={chevronSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 18 15 12 9 6" />
@@ -851,32 +855,33 @@ export const render = (state, dispatch) => {
               />
             </div>
 
-            {/* Mini Controls: Stream switching outer chevrons on both sides when multiple streams exist */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: streams.length > 1 ? '6px' : '10px', width: '100%' }}>
-              {streams.length > 1 && (
-                <button
-                  data-interactive="true"
-                  style={{
-                    ...smallControlBtnStyle,
-                    width: '20px',
-                    height: '20px',
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    color: 'rgba(255, 255, 255, 0.65)',
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const nextIdx = (activeStreamIndex - 1 + streams.length) % streams.length;
-                    dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  title={`Previous stream (${((activeStreamIndex - 1 + streams.length) % streams.length) + 1}/${streams.length})`}
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
-                </button>
-              )}
+            {/* Mini Controls: Stream switching outer chevrons on both sides */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%' }}>
+              <button
+                data-interactive="true"
+                style={{
+                  ...smallControlBtnStyle,
+                  width: '20px',
+                  height: '20px',
+                  background: streams.length > 1 ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+                  border: streams.length > 1 ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid transparent',
+                  color: streams.length > 1 ? 'rgba(255, 255, 255, 0.7)' : 'rgba(255, 255, 255, 0.2)',
+                  cursor: streams.length > 1 ? 'pointer' : 'default',
+                  opacity: streams.length > 1 ? 1 : 0.35,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (streams.length <= 1) return;
+                  const nextIdx = (activeStreamIndex - 1 + streams.length) % streams.length;
+                  dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                title={streams.length > 1 ? `Previous stream (${((activeStreamIndex - 1 + streams.length) % streams.length) + 1}/${streams.length})` : 'Single stream active'}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
               <button
                 data-interactive="true"
                 style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
@@ -916,30 +921,31 @@ export const render = (state, dispatch) => {
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
-              {streams.length > 1 && (
-                <button
-                  data-interactive="true"
-                  style={{
-                    ...smallControlBtnStyle,
-                    width: '20px',
-                    height: '20px',
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    color: 'rgba(255, 255, 255, 0.65)',
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const nextIdx = (activeStreamIndex + 1) % streams.length;
-                    dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  title={`Next stream (${((activeStreamIndex + 1) % streams.length) + 1}/${streams.length})`}
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="9 18 15 12 9 6" />
-                  </svg>
-                </button>
-              )}
+              <button
+                data-interactive="true"
+                style={{
+                  ...smallControlBtnStyle,
+                  width: '20px',
+                  height: '20px',
+                  background: streams.length > 1 ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+                  border: streams.length > 1 ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid transparent',
+                  color: streams.length > 1 ? 'rgba(255, 255, 255, 0.7)' : 'rgba(255, 255, 255, 0.2)',
+                  cursor: streams.length > 1 ? 'pointer' : 'default',
+                  opacity: streams.length > 1 ? 1 : 0.35,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (streams.length <= 1) return;
+                  const nextIdx = (activeStreamIndex + 1) % streams.length;
+                  dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                title={streams.length > 1 ? `Next stream (${((activeStreamIndex + 1) % streams.length) + 1}/${streams.length})` : 'Single stream active'}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
             </div>
           </div>
         ) : sizePreset === 'large' ? (

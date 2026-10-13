@@ -471,30 +471,78 @@ end tell
         pass
     return None
 
+def is_app_running(bundle_id, app_name):
+    target = f"{bundle_id} {app_name}".lower()
+    if "firefox" in target:
+        return is_process_running("firefox") or is_process_running("Firefox")
+    if "spotify" in target:
+        return is_process_running("Spotify")
+    if "apple.music" in target or app_name.lower() == "music" or "itunes" in target:
+        return is_process_running("Music")
+    if "webapp" in target or "ytmusic" in target or "youtube" in target:
+        return is_process_running("Web App")
+    if "chrome" in target:
+        return is_process_running("Google Chrome")
+    if "safari" in target:
+        return is_process_running("Safari")
+    return True
+
+def get_firefox_stream():
+    if not (is_process_running("firefox") or is_process_running("Firefox")):
+        return None
+    script = '''
+tell application "System Events"
+  try
+    tell process "firefox"
+      set winList to name of windows
+      return item 1 of winList
+    end tell
+  on error
+    return "none"
+  end try
+end tell
+'''
+    try:
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.0)
+        win_title = res.stdout.strip()
+        if win_title and win_title != "none":
+            title = win_title
+            for suffix in [" — Mozilla Firefox", " - Mozilla Firefox", " — Firefox", " - Firefox"]:
+                if suffix in title:
+                    title = title.split(suffix)[0].strip()
+            return {
+                "id": "firefox",
+                "title": title,
+                "artist": "",
+                "album": "",
+                "duration": 0.0,
+                "elapsed": 0.0,
+                "rate": 1,
+                "artwork": "",
+                "bundleId": "org.mozilla.firefox",
+                "appName": "Firefox",
+                "rating": None,
+                "supportsRating": False,
+                "updatedAt": round(time.time(), 3)
+            }
+    except Exception:
+        pass
+    return None
+
 def main():
     now = time.time()
     streams_map = {}
 
-    # Load recent cached streams
+    # Load recent cached streams (kept as long as process is running)
     if os.path.exists(CACHE_STREAMS_FILE):
         try:
             with open(CACHE_STREAMS_FILE, "r") as f:
                 cached = json.load(f)
                 for s in cached:
-                    # Keep if observed in the last 10 minutes
-                    if now - s.get("updatedAt", 0) < 600.0:
-                        # Validate that process is still running
-                        b_id = s.get("bundleId", "").lower()
-                        app_n = s.get("appName", "").lower()
-                        still_alive = True
-                        if "yt" in app_n or "webapp" in b_id:
-                            still_alive = is_process_running("Web App")
-                        elif "music" in app_n or "apple.music" in b_id:
-                            still_alive = is_process_running("Music")
-                        elif "spotify" in app_n or "spotify" in b_id:
-                            still_alive = is_process_running("Spotify")
-                        if still_alive:
-                            streams_map[s["id"]] = s
+                    b_id = s.get("bundleId", "")
+                    app_n = s.get("appName", "")
+                    if is_app_running(b_id, app_n):
+                        streams_map[s["id"]] = s
         except Exception:
             streams_map = {}
 
@@ -599,6 +647,12 @@ def main():
         sp_stream = get_spotify_stream()
         if sp_stream:
             streams_map["spotify"] = sp_stream
+
+    # 5. Check Firefox if not already updated via MediaRemote
+    if "firefox" not in streams_map or (primary_stream and primary_stream["id"] != "firefox"):
+        ff_stream = get_firefox_stream()
+        if ff_stream:
+            streams_map["firefox"] = ff_stream
 
     # Filter out dead streams
     active_streams = []
