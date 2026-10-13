@@ -10,6 +10,8 @@ import time
 CACHE_TRACK_FILE = "/tmp/nowplaying_track.txt"
 CACHE_ART_FILE = "/tmp/nowplaying_art_data.txt"
 CACHE_STATE_FILE = "/tmp/nowplaying_state.json"
+CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache.json"
+CACHE_RATINGS_FILE = "/tmp/nowplaying_ratings.json"
 
 def find_nowplaying_cli():
     paths = [
@@ -34,7 +36,7 @@ def get_nowplaying_data():
             [cli, "get-raw"],
             capture_output=True,
             text=True,
-            timeout=2.0
+            timeout=1.5
         )
         stdout = proc.stdout.strip()
         if not stdout or stdout == "null":
@@ -54,7 +56,6 @@ def process_artwork(data, track_key):
 
     artwork_data_url = ""
 
-    # If the track changed, convert new artwork
     if track_key != cached_track:
         raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData")
         if raw_art:
@@ -92,7 +93,6 @@ def process_artwork(data, track_key):
         except Exception:
             pass
     else:
-        # Track hasn't changed, reuse cached artwork
         if os.path.exists(CACHE_ART_FILE):
             try:
                 with open(CACHE_ART_FILE, "r") as f:
@@ -102,6 +102,13 @@ def process_artwork(data, track_key):
 
     return artwork_data_url
 
+def is_process_running(proc_name):
+    try:
+        res = subprocess.run(["pgrep", "-x", proc_name], capture_output=True, timeout=0.5)
+        return res.returncode == 0
+    except Exception:
+        return False
+
 def get_app_name(bundle_id):
     if not bundle_id:
         return "macOS Audio"
@@ -110,12 +117,18 @@ def get_app_name(bundle_id):
         return "Spotify"
     if "apple.music" in b or "itunes" in b:
         return "Apple Music"
-    if "safari" in b or "webkit" in b:
-        return "Web Audio"
+    if "safari.webapp" in b:
+        return "YouTube Music"
+    if "safari" in b:
+        return "Safari"
     if "chrome" in b:
         return "Google Chrome"
     if "firefox" in b:
         return "Firefox"
+    if "webkit" in b:
+        if is_process_running("Web App"):
+            return "YouTube Music"
+        return "Web Audio"
     if "iina" in b:
         return "IINA"
     if "vlc" in b:
@@ -220,144 +233,416 @@ def calculate_progress(track_key, raw_elapsed, duration, playback_rate):
 
     return current_elapsed
 
-def get_player_rating(bundle_id, app_name):
-    b_lower = bundle_id.lower()
-    app_lower = app_name.lower()
-    if "safari.webapp" in b_lower or "webkit" in b_lower or "web audio" in app_lower or "yt music" in app_lower:
-        script = '''
+def get_ytmusic_rating():
+    if not is_process_running("Web App"):
+        return None
+    script = '''
 tell application "System Events"
   try
-    set p to process "Web App"
-    set w to window 1 of p
-    set s to first UI element of w whose role is "AXSplitGroup"
-    set tb to first UI element of s whose role is "AXTabGroup"
-    set g1 to first UI element of tb whose role is "AXGroup"
-    set g2 to first UI element of g1 whose role is "AXGroup"
-    set sa to first UI element of g2 whose role is "AXScrollArea"
-    set wa to first UI element of sa whose role is "AXWebArea"
-    set playerBar to first UI element of wa whose description is "Player bar"
-    set likeBox to first UI element of playerBar whose description is "Like"
-    set dislikeBox to first UI element of playerBar whose description is "Dislike"
-    return ((value of likeBox as text) & "," & (value of dislikeBox as text))
-  on error
-    try
+    tell process "Web App"
+      set w to window 1
+      set s to first UI element of w whose role is "AXSplitGroup"
+      set tb to first UI element of s whose role is "AXTabGroup"
+      set g1 to first UI element of tb whose role is "AXGroup"
+      set g2 to first UI element of g1 whose role is "AXGroup"
+      set sa to first UI element of g2 whose role is "AXScrollArea"
+      set wa to first UI element of sa whose role is "AXWebArea"
+      set playerBar to first UI element of wa whose description is "Player bar"
       set likeBox to first checkbox of UI element 18 of playerBar
       set dislikeBox to UI element 19 of playerBar
       return ((value of likeBox as text) & "," & (value of dislikeBox as text))
-    on error
-      return "none"
-    end try
+    end tell
+  on error
+    return "none"
   end try
 end tell
 '''
-        try:
-            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
-            out = res.stdout.strip()
-            if out.startswith("1,"):
-                return "liked"
-            elif out.endswith(",1"):
-                return "disliked"
-            elif out == "0,0":
-                return "none"
-        except Exception:
-            pass
+    try:
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
+        out = res.stdout.strip()
+        if out.startswith("1,"):
+            return "liked"
+        elif out.endswith(",1"):
+            return "disliked"
+        elif out == "0,0":
+            return None
+    except Exception:
+        pass
+    return None
 
-    if "music" in b_lower or "apple music" in app_lower:
-        script = '''
+def get_ytmusic_direct_stream():
+    if not is_process_running("Web App"):
+        return None
+    script = '''
+tell application "System Events"
+  try
+    tell process "Web App"
+      set w to window 1
+      set winTitle to name of w
+      set s to first UI element of w whose role is "AXSplitGroup"
+      set tb to first UI element of s whose role is "AXTabGroup"
+      set g1 to first UI element of tb whose role is "AXGroup"
+      set g2 to first UI element of g1 whose role is "AXGroup"
+      set sa to first UI element of g2 whose role is "AXScrollArea"
+      set wa to first UI element of sa whose role is "AXWebArea"
+      set pb to first UI element of wa whose description is "Player bar"
+      set t to title of UI element 12 of pb
+      set a to title of UI element 15 of pb
+      set tm to value of UI element 10 of pb
+      set pp to title of UI element 4 of pb
+      set lk to value of first checkbox of UI element 18 of pb
+      set dlk to value of UI element 19 of pb
+      return (t & "|||" & a & "|||" & tm & "|||" & pp & "|||" & (lk as text) & "|||" & (dlk as text) & "|||" & winTitle)
+    end tell
+  on error
+    return "none"
+  end try
+end tell
+'''
+    try:
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.5)
+        out = res.stdout.strip()
+        if "|||" in out:
+            parts = out.split("|||")
+            title = parts[0].strip()
+            artist = parts[1].strip() if len(parts) > 1 else ""
+            time_str = parts[2].strip() if len(parts) > 2 else ""
+            pp_title = parts[3].strip() if len(parts) > 3 else "Play"
+            lk_val = parts[4].strip() if len(parts) > 4 else "0"
+            dlk_val = parts[5].strip() if len(parts) > 5 else "0"
+
+            if not title:
+                win_title = parts[6].strip() if len(parts) > 6 else ""
+                if " | YouTube Music" in win_title:
+                    title = win_title.replace(" | YouTube Music", "").strip()
+
+            if not title:
+                return None
+
+            elapsed = 0.0
+            duration = 0.0
+            if " / " in time_str:
+                e_str, d_str = time_str.split(" / ", 1)
+                try:
+                    e_parts = [float(x) for x in e_str.split(":")]
+                    elapsed = e_parts[0] * 60 + e_parts[1] if len(e_parts) == 2 else e_parts[0]
+                    d_parts = [float(x) for x in d_str.split(":")]
+                    duration = d_parts[0] * 60 + d_parts[1] if len(d_parts) == 2 else d_parts[0]
+                except Exception:
+                    pass
+
+            rate = 1 if pp_title.lower() == "pause" else 0
+            rating = "liked" if lk_val == "1" else ("disliked" if dlk_val == "1" else None)
+
+            # Check cached artwork
+            artwork_url = ""
+            if os.path.exists(CACHE_ART_FILE):
+                try:
+                    with open(CACHE_ART_FILE, "r") as f:
+                        artwork_url = f.read().strip()
+                except Exception:
+                    pass
+
+            return {
+                "id": "ytmusic",
+                "title": title,
+                "artist": artist,
+                "album": "",
+                "duration": round(duration, 1),
+                "elapsed": round(elapsed, 1),
+                "rate": rate,
+                "artwork": artwork_url,
+                "bundleId": "com.apple.Safari.WebApp.F5D92F4A-8F5E-4368-A535-047D3666F565",
+                "appName": "YouTube Music",
+                "rating": rating,
+                "supportsRating": True,
+                "updatedAt": round(time.time(), 3)
+            }
+    except Exception:
+        pass
+    return None
+
+def get_apple_music_stream():
+    if not is_process_running("Music"):
+        return None
+    script = '''
 tell application "System Events"
   if (name of processes) contains "Music" then
     tell application "Music"
-      if favorited of current track then return "liked"
-      if disliked of current track then return "disliked"
-      return "none"
+      set pState to player state as text
+      set tName to name of current track
+      set tArtist to artist of current track
+      set tAlbum to album of current track
+      set tDur to duration of current track
+      set tPos to player position
+      set tFav to favorited of current track
+      set tDis to disliked of current track
+      return (pState & "|||" & tName & "|||" & tArtist & "|||" & tAlbum & "|||" & (tDur as text) & "|||" & (tPos as text) & "|||" & (tFav as text) & "|||" & (tDis as text))
     end tell
   end if
   return "none"
 end tell
 '''
-        try:
-            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.0)
-            out = res.stdout.strip()
-            if out in ("liked", "disliked", "none"):
-                return out
-        except Exception:
-            pass
+    try:
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
+        out = res.stdout.strip()
+        if "|||" in out:
+            parts = out.split("|||")
+            p_state = parts[0].lower()
+            name = parts[1].strip()
+            artist = parts[2].strip()
+            album = parts[3].strip()
+            duration = float(parts[4]) if parts[4] else 0.0
+            pos = float(parts[5]) if parts[5] else 0.0
+            fav = parts[6].lower() == "true"
+            dis = parts[7].lower() == "true"
+            rating = "liked" if fav else ("disliked" if dis else None)
+            rate = 1 if p_state == "playing" else 0
 
+            return {
+                "id": "apple_music",
+                "title": name,
+                "artist": artist,
+                "album": album,
+                "duration": round(duration, 1),
+                "elapsed": round(pos, 1),
+                "rate": rate,
+                "artwork": "",
+                "bundleId": "com.apple.Music",
+                "appName": "Apple Music",
+                "rating": rating,
+                "supportsRating": True,
+                "updatedAt": round(time.time(), 3)
+            }
+    except Exception:
+        pass
+    return None
+
+def get_spotify_stream():
+    if not is_process_running("Spotify"):
+        return None
+    script = '''
+tell application "System Events"
+  if (name of processes) contains "Spotify" then
+    tell application "Spotify"
+      set pState to player state as text
+      set tName to name of current track
+      set tArtist to artist of current track
+      set tAlbum to album of current track
+      set tDur to (duration of current track) / 1000
+      set tPos to player position
+      set tArt to artwork url of current track
+      return (pState & "|||" & tName & "|||" & tArtist & "|||" & tAlbum & "|||" & (tDur as text) & "|||" & (tPos as text) & "|||" & tArt)
+    end tell
+  end if
+  return "none"
+end tell
+'''
+    try:
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
+        out = res.stdout.strip()
+        if "|||" in out:
+            parts = out.split("|||")
+            p_state = parts[0].lower()
+            name = parts[1].strip()
+            artist = parts[2].strip()
+            album = parts[3].strip()
+            duration = float(parts[4]) if parts[4] else 0.0
+            pos = float(parts[5]) if parts[5] else 0.0
+            art_url = parts[6].strip() if len(parts) > 6 else ""
+            rate = 1 if p_state == "playing" else 0
+
+            return {
+                "id": "spotify",
+                "title": name,
+                "artist": artist,
+                "album": album,
+                "duration": round(duration, 1),
+                "elapsed": round(pos, 1),
+                "rate": rate,
+                "artwork": art_url,
+                "bundleId": "com.spotify.client",
+                "appName": "Spotify",
+                "rating": None,
+                "supportsRating": False,
+                "updatedAt": round(time.time(), 3)
+            }
+    except Exception:
+        pass
     return None
 
 def main():
-    data = get_nowplaying_data()
-    if not data:
+    now = time.time()
+    streams_map = {}
+
+    # Load recent cached streams
+    if os.path.exists(CACHE_STREAMS_FILE):
+        try:
+            with open(CACHE_STREAMS_FILE, "r") as f:
+                cached = json.load(f)
+                for s in cached:
+                    # Keep if observed in the last 10 minutes
+                    if now - s.get("updatedAt", 0) < 600.0:
+                        # Validate that process is still running
+                        b_id = s.get("bundleId", "").lower()
+                        app_n = s.get("appName", "").lower()
+                        still_alive = True
+                        if "yt" in app_n or "webapp" in b_id:
+                            still_alive = is_process_running("Web App")
+                        elif "music" in app_n or "apple.music" in b_id:
+                            still_alive = is_process_running("Music")
+                        elif "spotify" in app_n or "spotify" in b_id:
+                            still_alive = is_process_running("Spotify")
+                        if still_alive:
+                            streams_map[s["id"]] = s
+        except Exception:
+            streams_map = {}
+
+    # 1. Primary MediaRemote NowPlaying query
+    mr_data = get_nowplaying_data()
+    primary_stream = None
+
+    if mr_data:
+        title = mr_data.get("kMRMediaRemoteNowPlayingInfoTitle") or ""
+        if title and title != "null":
+            artist = mr_data.get("kMRMediaRemoteNowPlayingInfoArtist") or ""
+            if artist == "null":
+                artist = ""
+            album = mr_data.get("kMRMediaRemoteNowPlayingInfoAlbum") or ""
+            if album == "null":
+                album = ""
+
+            duration = float(mr_data.get("kMRMediaRemoteNowPlayingInfoDuration") or 0)
+            raw_elapsed = float(mr_data.get("kMRMediaRemoteNowPlayingInfoElapsedTime") or 0)
+            playback_rate = int(mr_data.get("kMRMediaRemoteNowPlayingInfoPlaybackRate") or 0)
+            bundle_id = mr_data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or ""
+            uid = mr_data.get("kMRMediaRemoteNowPlayingInfoUniqueIdentifier") or ""
+
+            b_lower = bundle_id.lower()
+            if "safari.webapp" in b_lower or ("webkit" in b_lower and is_process_running("Web App")):
+                app_name = "YouTube Music"
+                stream_id = "ytmusic"
+                supports_rating = True
+            elif "apple.music" in b_lower:
+                app_name = "Apple Music"
+                stream_id = "apple_music"
+                supports_rating = True
+            elif "spotify" in b_lower:
+                app_name = "Spotify"
+                stream_id = "spotify"
+                supports_rating = False
+            elif "safari" in b_lower:
+                app_name = "Safari"
+                stream_id = "safari"
+                supports_rating = False
+            elif "chrome" in b_lower:
+                app_name = "Google Chrome"
+                stream_id = "chrome"
+                supports_rating = False
+            elif "firefox" in b_lower:
+                app_name = "Firefox"
+                stream_id = "firefox"
+                supports_rating = False
+            else:
+                app_name = get_app_name(bundle_id)
+                stream_id = bundle_id if bundle_id else "mediaremote"
+                supports_rating = False
+
+            art_track_key = f"{title}___{artist}___{album}"
+            progress_track_key = f"{uid}___{title}___{artist}___{round(duration, 1)}"
+            artwork_url = process_artwork(mr_data, art_track_key)
+            current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
+
+            # Rating determination
+            rating = None
+            if supports_rating:
+                if stream_id == "ytmusic":
+                    rating = get_ytmusic_rating()
+                elif stream_id == "apple_music":
+                    am_s = get_apple_music_stream()
+                    if am_s:
+                        rating = am_s.get("rating")
+            else:
+                rating = None
+
+            primary_stream = {
+                "id": stream_id,
+                "title": title,
+                "artist": artist,
+                "album": album,
+                "duration": round(duration, 1),
+                "elapsed": round(current_elapsed, 1),
+                "rate": playback_rate,
+                "artwork": artwork_url,
+                "bundleId": bundle_id,
+                "appName": app_name,
+                "rating": rating,
+                "supportsRating": supports_rating,
+                "updatedAt": round(now, 3)
+            }
+            streams_map[stream_id] = primary_stream
+
+    # 2. Check YouTube Music if not already updated via MediaRemote
+    if "ytmusic" not in streams_map or (primary_stream and primary_stream["id"] != "ytmusic"):
+        yt_stream = get_ytmusic_direct_stream()
+        if yt_stream:
+            streams_map["ytmusic"] = yt_stream
+
+    # 3. Check Apple Music if not already updated via MediaRemote
+    if "apple_music" not in streams_map or (primary_stream and primary_stream["id"] != "apple_music"):
+        am_stream = get_apple_music_stream()
+        if am_stream:
+            streams_map["apple_music"] = am_stream
+
+    # 4. Check Spotify if not already updated via MediaRemote
+    if "spotify" not in streams_map or (primary_stream and primary_stream["id"] != "spotify"):
+        sp_stream = get_spotify_stream()
+        if sp_stream:
+            streams_map["spotify"] = sp_stream
+
+    # Filter out dead streams
+    active_streams = []
+    for s_id, s in streams_map.items():
+        if s.get("title") and s.get("title") != "null":
+            active_streams.append(s)
+
+    # Sort: currently playing (rate == 1) first, then by most recently updated
+    active_streams.sort(key=lambda s: (1 if s.get("rate") == 1 else 0, s.get("updatedAt", 0)), reverse=True)
+
+    # Save cache
+    try:
+        with open(CACHE_STREAMS_FILE, "w") as f:
+            json.dump(active_streams, f)
+    except Exception:
+        pass
+
+    if not active_streams:
         if os.path.exists(CACHE_STATE_FILE):
             try:
                 os.remove(CACHE_STATE_FILE)
             except Exception:
                 pass
-        print(json.dumps({"playing": False}))
+        print(json.dumps({"playing": False, "streams": []}))
         return
 
-    title = data.get("kMRMediaRemoteNowPlayingInfoTitle") or ""
-    if not title or title == "null":
-        if os.path.exists(CACHE_STATE_FILE):
-            try:
-                os.remove(CACHE_STATE_FILE)
-            except Exception:
-                pass
-        print(json.dumps({"playing": False}))
-        return
-
-    artist = data.get("kMRMediaRemoteNowPlayingInfoArtist") or ""
-    if artist == "null":
-        artist = ""
-
-    album = data.get("kMRMediaRemoteNowPlayingInfoAlbum") or ""
-    if album == "null":
-        album = ""
-
-    duration = float(data.get("kMRMediaRemoteNowPlayingInfoDuration") or 0)
-    raw_elapsed = float(data.get("kMRMediaRemoteNowPlayingInfoElapsedTime") or 0)
-    playback_rate = int(data.get("kMRMediaRemoteNowPlayingInfoPlaybackRate") or 0)
-    bundle_id = data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or ""
-    uid = data.get("kMRMediaRemoteNowPlayingInfoUniqueIdentifier") or ""
-
-    art_track_key = f"{title}___{artist}___{album}"
-    progress_track_key = f"{uid}___{title}___{artist}___{round(duration, 1)}"
-
-    artwork_url = process_artwork(data, art_track_key)
-    app_name = get_app_name(bundle_id)
-    current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
-
-    player_rating = get_player_rating(bundle_id, app_name)
-    if player_rating == "liked":
-        rating = "liked"
-    elif player_rating == "disliked":
-        rating = "disliked"
-    elif player_rating == "none":
-        rating = None
-    else:
-        rating = None
-        if os.path.exists("/tmp/nowplaying_ratings.json"):
-            try:
-                with open("/tmp/nowplaying_ratings.json", "r") as f:
-                    ratings_cache = json.load(f)
-                    rating = ratings_cache.get(f"{title}___{artist}".lower())
-            except Exception:
-                pass
-
+    main_stream = active_streams[0]
     result = {
-        "playing": True,
-        "title": title,
-        "artist": artist,
-        "album": album,
-        "duration": round(duration, 1),
-        "elapsed": round(current_elapsed, 1),
-        "rate": playback_rate,
-        "artwork": artwork_url,
-        "bundleId": bundle_id,
-        "appName": app_name,
-        "rating": rating,
-        "updatedAt": round(time.time(), 3)
+        "playing": any(s.get("rate") == 1 for s in active_streams),
+        "streams": active_streams,
+        "title": main_stream.get("title", ""),
+        "artist": main_stream.get("artist", ""),
+        "album": main_stream.get("album", ""),
+        "duration": main_stream.get("duration", 0),
+        "elapsed": main_stream.get("elapsed", 0),
+        "rate": main_stream.get("rate", 0),
+        "artwork": main_stream.get("artwork", ""),
+        "bundleId": main_stream.get("bundleId", ""),
+        "appName": main_stream.get("appName", ""),
+        "rating": main_stream.get("rating"),
+        "supportsRating": main_stream.get("supportsRating", False),
+        "updatedAt": main_stream.get("updatedAt", now)
     }
+
     print(json.dumps(result))
 
 if __name__ == "__main__":

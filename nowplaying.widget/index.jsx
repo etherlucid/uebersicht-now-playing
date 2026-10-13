@@ -61,7 +61,8 @@ export const initialState = {
   startPosY: 0,
   cardWidth: initialPreset === 'small' ? 154 : 300,
   cardHeight: initialPreset === 'small' ? 154 : (initialPreset === 'large' ? 435 : 154),
-  data: { playing: false },
+  data: { playing: false, streams: [] },
+  activeStreamIndex: 0,
   ratings: initialRatings,
   error: null,
 };
@@ -77,20 +78,32 @@ export const updateState = (event, previousState) => {
       const parsed = JSON.parse(event.output || '{}');
       parsed.clientReceivedAt = Date.now();
       let updatedRatings = previousState.ratings || {};
-      if (parsed.title) {
-        const key = `${parsed.title}___${parsed.artist || ''}`.toLowerCase();
-        if (parsed.rating !== undefined) {
-          if (parsed.rating && parsed.rating !== 'none') {
-            updatedRatings = { ...updatedRatings, [key]: parsed.rating };
-          } else {
-            const copy = { ...updatedRatings };
-            delete copy[key];
-            updatedRatings = copy;
+
+      const streams = (parsed.streams && parsed.streams.length > 0)
+        ? parsed.streams
+        : (parsed.title ? [parsed] : []);
+
+      for (const s of streams) {
+        if (s.title) {
+          const key = `${s.title}___${s.artist || ''}`.toLowerCase();
+          if (s.rating !== undefined && s.rating !== null) {
+            if (s.rating !== 'none') {
+              updatedRatings = { ...updatedRatings, [key]: s.rating };
+            } else {
+              const copy = { ...updatedRatings };
+              delete copy[key];
+              updatedRatings = copy;
+            }
           }
         }
       }
+
+      const maxIdx = Math.max(0, streams.length - 1);
+      const activeIdx = Math.min(maxIdx, previousState.activeStreamIndex || 0);
+
       return {
         ...previousState,
+        activeStreamIndex: activeIdx,
         data: parsed,
         ratings: updatedRatings,
         error: null,
@@ -101,6 +114,13 @@ export const updateState = (event, previousState) => {
         error: err.message,
       };
     }
+  }
+
+  if (event.type === 'SET_STREAM_INDEX') {
+    return {
+      ...previousState,
+      activeStreamIndex: event.index,
+    };
   }
 
   if (event.type === 'SET_RATING') {
@@ -115,44 +135,99 @@ export const updateState = (event, previousState) => {
         localStorage.setItem(STORAGE_RATINGS_KEY, JSON.stringify(updatedRatings));
       } catch (e) {}
     }
+
+    let updatedData = previousState.data;
+    if (updatedData) {
+      const currentStreams = updatedData.streams && updatedData.streams.length > 0
+        ? updatedData.streams
+        : (updatedData.title ? [updatedData] : []);
+
+      const newStreams = currentStreams.map((s, idx) => {
+        if (idx === (previousState.activeStreamIndex || 0) || (event.streamId && s.id === event.streamId)) {
+          return { ...s, rating: event.rating === 'none' ? null : event.rating };
+        }
+        return s;
+      });
+
+      updatedData = {
+        ...updatedData,
+        streams: newStreams,
+        rating: event.rating === 'none' ? null : event.rating,
+      };
+    }
+
     return {
       ...previousState,
       ratings: updatedRatings,
-      data: previousState.data ? { ...previousState.data, rating: event.rating } : previousState.data,
+      data: updatedData,
     };
   }
 
   if (event.type === 'OPTIMISTIC_TOGGLE_PLAY') {
     if (!previousState.data || !previousState.data.playing) return previousState;
-    const currentRate = previousState.data.rate ?? 1;
+    const streams = previousState.data.streams && previousState.data.streams.length > 0
+      ? previousState.data.streams
+      : [previousState.data];
+
+    const streamIdx = event.streamIndex ?? (previousState.activeStreamIndex || 0);
+    const targetStream = streams[streamIdx] || streams[0];
+    const currentRate = targetStream.rate ?? 1;
     const nextRate = currentRate === 1 ? 0 : 1;
-    let nextElapsed = previousState.data.elapsed || 0;
+    let nextElapsed = targetStream.elapsed || 0;
     if (nextRate === 0) {
-      const delta = (Date.now() - (previousState.data.clientReceivedAt || Date.now())) / 1000;
+      const delta = (Date.now() - (targetStream.clientReceivedAt || previousState.data.clientReceivedAt || Date.now())) / 1000;
       nextElapsed = Math.min(
-        previousState.data.duration || 0,
+        targetStream.duration || 0,
         nextElapsed + Math.max(0, delta)
       );
     }
+
+    const updatedStreams = streams.map((s, idx) => {
+      if (idx === streamIdx) {
+        return {
+          ...s,
+          rate: nextRate,
+          elapsed: nextElapsed,
+          clientReceivedAt: Date.now(),
+        };
+      }
+      return s;
+    });
+
     return {
       ...previousState,
       data: {
         ...previousState.data,
-        rate: nextRate,
-        elapsed: nextElapsed,
-        clientReceivedAt: Date.now(),
+        rate: streamIdx === (previousState.activeStreamIndex || 0) ? nextRate : previousState.data.rate,
+        streams: updatedStreams,
       },
     };
   }
 
   if (event.type === 'TRACK_CHANGE_PENDING') {
     if (!previousState.data || !previousState.data.playing) return previousState;
+    const streams = previousState.data.streams && previousState.data.streams.length > 0
+      ? previousState.data.streams
+      : [previousState.data];
+
+    const streamIdx = event.streamIndex ?? (previousState.activeStreamIndex || 0);
+    const updatedStreams = streams.map((s, idx) => {
+      if (idx === streamIdx) {
+        return {
+          ...s,
+          elapsed: 0,
+          clientReceivedAt: Date.now(),
+        };
+      }
+      return s;
+    });
+
     return {
       ...previousState,
       data: {
         ...previousState.data,
-        elapsed: 0,
-        clientReceivedAt: Date.now(),
+        elapsed: streamIdx === (previousState.activeStreamIndex || 0) ? 0 : previousState.data.elapsed,
+        streams: updatedStreams,
       },
     };
   }
@@ -332,31 +407,30 @@ export const render = (state, dispatch) => {
     });
   };
 
-  const handleControl = (action, e) => {
-    e.stopPropagation();
-    if (action === 'togglePlayPause') {
-      dispatch({ type: 'OPTIMISTIC_TOGGLE_PLAY' });
-    } else if (action === 'next' || action === 'previous') {
-      dispatch({ type: 'TRACK_CHANGE_PENDING' });
-    }
-    const cli = '/opt/homebrew/bin/nowplaying-cli';
-    run(`${cli} ${action} 2>/dev/null || nowplaying-cli ${action}`);
-  };
+  const streams = (data && data.streams && data.streams.length > 0)
+    ? data.streams
+    : (data && data.title ? [data] : []);
+  const activeStreamIndex = Math.min(Math.max(0, streams.length - 1), state?.activeStreamIndex || 0);
+  const currentStream = streams[activeStreamIndex] || data || {};
 
-  const isPlaying = Boolean(data && data.playing && data.title);
-  const isPaused = Boolean(isPlaying && data.rate === 0);
+  const isPlaying = Boolean(currentStream && currentStream.title && currentStream.title !== 'Nothing Playing');
+  const isPaused = Boolean(isPlaying && currentStream.rate === 0);
 
-  const duration = data?.duration || 0;
-  const baseElapsed = data?.elapsed || 0;
-  const timeSinceUpdate = (Date.now() - (data?.clientReceivedAt || Date.now())) / 1000;
+  const duration = currentStream?.duration || 0;
+  const baseElapsed = currentStream?.elapsed || 0;
+  const timeSinceUpdate = (Date.now() - (currentStream?.clientReceivedAt || data?.clientReceivedAt || Date.now())) / 1000;
   const elapsed = (isPlaying && !isPaused && duration > 0)
     ? Math.min(duration, baseElapsed + Math.max(0, timeSinceUpdate))
     : baseElapsed;
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (elapsed / duration) * 100)) : 0;
 
-  const title = isPlaying ? data.title : (error ? 'Widget Error' : 'Nothing Playing');
-  const artist = isPlaying ? (data.artist || 'Unknown Artist') : (error ? error : 'Playback Idle');
-  const album = isPlaying ? (data.album || '') : '';
+  const title = isPlaying ? currentStream.title : (error ? 'Widget Error' : 'Nothing Playing');
+  const artist = isPlaying ? (currentStream.artist || 'Unknown Artist') : (error ? error : 'Playback Idle');
+  const album = isPlaying ? (currentStream.album || '') : '';
+  const appName = currentStream.appName || '';
+  const bundleId = currentStream.bundleId || '';
+  const streamId = currentStream.id || '';
+  const supportsRating = currentStream.supportsRating ?? false;
 
   const positionStyle = {
     position: 'absolute',
@@ -369,33 +443,187 @@ export const render = (state, dispatch) => {
     transition: isDragging ? 'none' : 'box-shadow 0.2s ease',
   };
 
-  const trackKey = (data && data.title)
-    ? `${data.title}___${data.artist || ''}`.toLowerCase()
+  const trackKey = (currentStream && currentStream.title)
+    ? `${currentStream.title}___${currentStream.artist || ''}`.toLowerCase()
     : '';
 
   const ratings = state?.ratings || {};
-  const currentRating = (data && data.rating !== undefined && data.rating !== null)
-    ? (data.rating === 'none' ? null : data.rating)
+  const currentRating = (currentStream && currentStream.rating !== undefined && currentStream.rating !== null)
+    ? (currentStream.rating === 'none' ? null : currentStream.rating)
     : (trackKey ? ratings[trackKey] : null);
 
   const isLiked = currentRating === 'liked';
   const isDisliked = currentRating === 'disliked';
 
+  const handleControl = (action, e) => {
+    e.stopPropagation();
+    if (!isPlaying) return;
+    if (action === 'togglePlayPause') {
+      dispatch({ type: 'OPTIMISTIC_TOGGLE_PLAY', streamIndex: activeStreamIndex });
+    } else if (action === 'next' || action === 'previous') {
+      dispatch({ type: 'TRACK_CHANGE_PENDING', streamIndex: activeStreamIndex });
+    }
+    const pyScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/media_control.py';
+    const pyScriptFallback = 'nowplaying.widget/media_control.py';
+    const escapedAction = JSON.stringify(action);
+    const escapedId = JSON.stringify(streamId || '');
+    const escapedApp = JSON.stringify(appName || '');
+    const escapedBundle = JSON.stringify(bundleId || '');
+    const escapedKey = JSON.stringify(trackKey || '');
+    run(`python3 "${pyScript}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null || python3 "${pyScriptFallback}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null`);
+  };
+
   const handleRating = (action, e) => {
     e.stopPropagation();
     if (!isPlaying) return;
-    let nextRating = null;
-    if (action === 'like') {
-      nextRating = isLiked ? null : 'liked';
-    } else if (action === 'dislike') {
-      nextRating = isDisliked ? null : 'disliked';
-    }
-    dispatch({ type: 'SET_RATING', trackKey, rating: nextRating });
+
+    // Do NOT optimistically set the color!
+    // Execute media_control.py. Only if the stream supports rating and succeeds, update state.
     const pyScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/media_control.py';
     const pyScriptFallback = 'nowplaying.widget/media_control.py';
+    const escapedAction = JSON.stringify(action);
+    const escapedId = JSON.stringify(streamId || '');
+    const escapedApp = JSON.stringify(appName || '');
+    const escapedBundle = JSON.stringify(bundleId || '');
     const escapedKey = JSON.stringify(trackKey || '');
-    const escapedRating = JSON.stringify(nextRating || 'none');
-    run(`python3 "${pyScript}" ${action} ${escapedKey} ${escapedRating} 2>/dev/null || python3 "${pyScriptFallback}" ${action} ${escapedKey} ${escapedRating} 2>/dev/null`);
+
+    run(
+      `python3 "${pyScript}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null || python3 "${pyScriptFallback}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null`,
+      (err, output) => {
+        if (err || !output) return;
+        try {
+          const res = JSON.parse(output.trim());
+          if (res && res.success) {
+            const nextRating = res.rating === 'none' ? null : res.rating;
+            dispatch({ type: 'SET_RATING', trackKey, rating: nextRating, streamId });
+          }
+        } catch (e) {}
+      }
+    );
+  };
+
+  const renderStreamCarousel = (isSmall = false) => {
+    if (!streams || streams.length <= 1) return null;
+
+    return (
+      <div
+        data-interactive="true"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: isSmall ? '4px' : '6px',
+          padding: isSmall ? '1px 5px' : '2px 8px',
+          borderRadius: '10px',
+          backgroundColor: 'rgba(255, 255, 255, 0.08)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          margin: isSmall ? '2px auto' : '2px auto',
+          width: 'fit-content',
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <button
+          data-interactive="true"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'rgba(255, 255, 255, 0.8)',
+            cursor: 'pointer',
+            padding: '0 2px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            outline: 'none',
+            fontSize: isSmall ? '11px' : '13px',
+            lineHeight: 1,
+            fontWeight: '700',
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            const nextIdx = (activeStreamIndex - 1 + streams.length) % streams.length;
+            dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
+          }}
+          title="Previous audio stream"
+        >
+          ‹
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+          {streams.map((s, idx) => {
+            const isActive = idx === activeStreamIndex;
+            return (
+              <div
+                key={s.id || idx}
+                data-interactive="true"
+                style={{
+                  width: isActive ? (isSmall ? '10px' : '12px') : (isSmall ? '4px' : '5px'),
+                  height: isSmall ? '4px' : '5px',
+                  borderRadius: '3px',
+                  backgroundColor: isActive ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dispatch({ type: 'SET_STREAM_INDEX', index: idx });
+                }}
+                title={`${s.appName || 'Stream'} (${idx + 1}/${streams.length})`}
+              />
+            );
+          })}
+        </div>
+
+        <button
+          data-interactive="true"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'rgba(255, 255, 255, 0.8)',
+            cursor: 'pointer',
+            padding: '0 2px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            outline: 'none',
+            fontSize: isSmall ? '11px' : '13px',
+            lineHeight: 1,
+            fontWeight: '700',
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            const nextIdx = (activeStreamIndex + 1) % streams.length;
+            dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
+          }}
+          title="Next audio stream"
+        >
+          ›
+        </button>
+
+        {!isSmall && appName && (
+          <span
+            style={{
+              fontSize: '9.5px',
+              fontWeight: '600',
+              color: 'rgba(255, 255, 255, 0.65)',
+              marginLeft: '2px',
+              letterSpacing: '0.2px',
+              maxWidth: '85px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={appName}
+          >
+            {appName}
+          </span>
+        )}
+      </div>
+    );
   };
 
   const renderLikeBtn = (customStyle = {}, iconSize = 14) => (
@@ -466,8 +694,8 @@ export const render = (state, dispatch) => {
           <div style={smallCardStyle}>
             {/* Artwork 56x56 */}
             <div style={smallArtworkContainerStyle}>
-              {isPlaying && data?.artwork ? (
-                <img src={data.artwork} alt="Album Art" style={artworkImageStyle} />
+              {isPlaying && currentStream?.artwork ? (
+                <img src={currentStream.artwork} alt="Album Art" style={artworkImageStyle} />
               ) : (
                 <div style={artworkFallbackStyle}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -524,6 +752,9 @@ export const render = (state, dispatch) => {
               />
             </div>
 
+            {/* Stream Switcher (if multiple streams) */}
+            {renderStreamCarousel(true)}
+
             {/* Mini Controls */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
               {renderDislikeBtn({ width: '20px', height: '20px' }, 11)}
@@ -576,8 +807,8 @@ export const render = (state, dispatch) => {
           <div style={largeCardStyle}>
             {/* Big 268x268 Album Art */}
             <div style={largeArtworkContainerStyle}>
-              {isPlaying && data?.artwork ? (
-                <img src={data.artwork} alt="Album Art" style={artworkImageStyle} />
+              {isPlaying && currentStream?.artwork ? (
+                <img src={currentStream.artwork} alt="Album Art" style={artworkImageStyle} />
               ) : (
                 <div style={{ ...artworkFallbackStyle, backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
                   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -657,6 +888,9 @@ export const render = (state, dispatch) => {
               </div>
             </div>
 
+            {/* Stream Switcher (if multiple streams) */}
+            {renderStreamCarousel(false)}
+
             {/* Large Controls */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', marginTop: '2px' }}>
               {renderDislikeBtn({ width: '30px', height: '30px' }, 15)}
@@ -710,8 +944,8 @@ export const render = (state, dispatch) => {
             {/* Top Section: Artwork + Info */}
             <div style={topRowStyle}>
               <div style={artworkContainerStyle}>
-                {isPlaying && data?.artwork ? (
-                  <img src={data.artwork} alt="Album Art" style={artworkImageStyle} />
+                {isPlaying && currentStream?.artwork ? (
+                  <img src={currentStream.artwork} alt="Album Art" style={artworkImageStyle} />
                 ) : (
                   <div style={artworkFallbackStyle}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -757,6 +991,9 @@ export const render = (state, dispatch) => {
                 <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
               </div>
             </div>
+
+            {/* Stream Switcher (if multiple streams) */}
+            {renderStreamCarousel(false)}
 
             {/* Bottom Section: Media Controls */}
             <div style={{ ...controlsRowStyle, gap: '12px' }}>
