@@ -41,7 +41,7 @@ export const settings = {
 
   // Single command mode:
   // Concise fastfetch layout (key specs aligned to Apple ASCII logo without verbose clutter):
-  command: 'fastfetch -s Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:CPU:GPU:Memory:Battery',
+  command: 'fastfetch -s Break:Break:Break:Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:CPU:GPU:Memory:Battery',
   // Alternative presets:
   // command: 'fastfetch -c neofetch', // Neofetch layout
   // command: 'fastfetch',             // Full verbose default
