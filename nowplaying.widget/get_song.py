@@ -487,6 +487,28 @@ def is_app_running(bundle_id, app_name):
         return is_process_running("Safari")
     return True
 
+def get_audio_pids():
+    try:
+        res = subprocess.run(["pmset", "-g", "assertions"], capture_output=True, text=True, timeout=0.8)
+        pids = set()
+        for line in res.stdout.splitlines():
+            if "Created for PID:" in line:
+                pid = line.split("Created for PID:")[1].strip().rstrip(".")
+                if pid.isdigit():
+                    pids.add(int(pid))
+        return pids
+    except Exception:
+        return set()
+
+def is_proc_playing_audio(proc_name):
+    try:
+        res = subprocess.run(["pgrep", "-i", proc_name], capture_output=True, text=True, timeout=0.5)
+        pids = [int(p) for p in res.stdout.split() if p.isdigit()]
+        audio_pids = get_audio_pids()
+        return any(p in audio_pids for p in pids)
+    except Exception:
+        return False
+
 def get_firefox_stream():
     if not (is_process_running("firefox") or is_process_running("Firefox")):
         return None
@@ -510,6 +532,8 @@ end tell
             for suffix in [" — Mozilla Firefox", " - Mozilla Firefox", " — Firefox", " - Firefox"]:
                 if suffix in title:
                     title = title.split(suffix)[0].strip()
+            # Accurately detect if Firefox is actively outputting sound
+            is_playing = 1 if is_proc_playing_audio("firefox") else 0
             return {
                 "id": "firefox",
                 "title": title,
@@ -517,7 +541,7 @@ end tell
                 "album": "",
                 "duration": 0.0,
                 "elapsed": 0.0,
-                "rate": 1,
+                "rate": is_playing,
                 "artwork": "",
                 "bundleId": "org.mozilla.firefox",
                 "appName": "Firefox",
@@ -527,7 +551,31 @@ end tell
             }
     except Exception:
         pass
-    return None
+def is_dedicated_music_app(stream):
+    app_name = (stream.get("appName") or "").lower()
+    bundle_id = (stream.get("bundleId") or "").lower()
+    stream_id = (stream.get("id") or "").lower()
+    music_keywords = ["youtube music", "ytmusic", "spotify", "apple music", "music", "itunes", "tidal", "deezer", "qobuz", "pandora", "soundcloud", "bandcamp"]
+    for kw in music_keywords:
+        if kw in app_name or kw in bundle_id or kw in stream_id:
+            return True
+    return False
+
+def stream_sort_key(s):
+    # 1. Playing apps first: rate == 1 gets top priority (weight 100)
+    is_playing = 100 if s.get("rate") == 1 else 0
+
+    # 2. Actual music apps bias: dedicated music players get a +10 boost
+    # (keeps generic web browsers / HTML video tabs like Firefox/Chrome behind music players when both play)
+    music_bias = 10 if is_dedicated_music_app(s) else 0
+
+    # 3. Rich metadata bonus: has artist or album art (+2)
+    has_rich_meta = 2 if (s.get("artist") or s.get("artwork")) else 0
+
+    # 4. Recency timestamp as final tie-breaker
+    recency = float(s.get("updatedAt", 0))
+
+    return (is_playing, music_bias, has_rich_meta, recency)
 
 def main():
     now = time.time()
@@ -660,8 +708,8 @@ def main():
         if s.get("title") and s.get("title") != "null":
             active_streams.append(s)
 
-    # Sort: currently playing (rate == 1) first, then by most recently updated
-    active_streams.sort(key=lambda s: (1 if s.get("rate") == 1 else 0, s.get("updatedAt", 0)), reverse=True)
+    # Sort: actively playing first, slight bias for actual music apps, then recency
+    active_streams.sort(key=stream_sort_key, reverse=True)
 
     # Save cache
     try:

@@ -99,7 +99,13 @@ export const updateState = (event, previousState) => {
       }
 
       const maxIdx = Math.max(0, streams.length - 1);
-      const activeIdx = Math.min(maxIdx, previousState.activeStreamIndex || 0);
+      let activeIdx = 0;
+      if (previousState.userSelectedStreamId) {
+        const foundIdx = streams.findIndex(s => s.id === previousState.userSelectedStreamId);
+        if (foundIdx !== -1) {
+          activeIdx = foundIdx;
+        }
+      }
 
       return {
         ...previousState,
@@ -117,9 +123,12 @@ export const updateState = (event, previousState) => {
   }
 
   if (event.type === 'SET_STREAM_INDEX') {
+    const streams = previousState.data?.streams || [];
+    const stream = streams[event.index];
     return {
       ...previousState,
       activeStreamIndex: event.index,
+      userSelectedStreamId: event.streamId || stream?.id || null,
     };
   }
 
