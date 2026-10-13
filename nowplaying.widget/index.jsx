@@ -514,7 +514,7 @@ export const render = (state, dispatch) => {
 
             {/* Mini Controls */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
-              {renderLikeBtn({ width: '20px', height: '20px' }, 11)}
+              {renderDislikeBtn({ width: '20px', height: '20px' }, 11)}
               <button
                 data-interactive="true"
                 style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
@@ -554,7 +554,7 @@ export const render = (state, dispatch) => {
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
-              {renderDislikeBtn({ width: '20px', height: '20px' }, 11)}
+              {renderLikeBtn({ width: '20px', height: '20px' }, 11)}
             </div>
           </div>
         ) : sizePreset === 'large' ? (
@@ -647,7 +647,7 @@ export const render = (state, dispatch) => {
 
             {/* Large Controls */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', marginTop: '2px' }}>
-              {renderLikeBtn({ width: '30px', height: '30px' }, 15)}
+              {renderDislikeBtn({ width: '30px', height: '30px' }, 15)}
               <button
                 data-interactive="true"
                 style={{ ...controlBtnStyle, width: '34px', height: '34px' }}
@@ -687,7 +687,7 @@ export const render = (state, dispatch) => {
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
-              {renderDislikeBtn({ width: '30px', height: '30px' }, 15)}
+              {renderLikeBtn({ width: '30px', height: '30px' }, 15)}
             </div>
           </div>
         ) : (
@@ -748,7 +748,7 @@ export const render = (state, dispatch) => {
 
             {/* Bottom Section: Media Controls */}
             <div style={{ ...controlsRowStyle, gap: '12px' }}>
-              {renderLikeBtn({ width: '28px', height: '28px' }, 14)}
+              {renderDislikeBtn({ width: '28px', height: '28px' }, 14)}
               <button
                 data-interactive="true"
                 style={controlBtnStyle}
@@ -788,7 +788,7 @@ export const render = (state, dispatch) => {
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
-              {renderDislikeBtn({ width: '28px', height: '28px' }, 14)}
+              {renderLikeBtn({ width: '28px', height: '28px' }, 14)}
             </div>
           </div>
         )}
