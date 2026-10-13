@@ -220,6 +220,71 @@ def calculate_progress(track_key, raw_elapsed, duration, playback_rate):
 
     return current_elapsed
 
+def get_player_rating(bundle_id, app_name):
+    b_lower = bundle_id.lower()
+    app_lower = app_name.lower()
+    if "safari.webapp" in b_lower or "webkit" in b_lower or "web audio" in app_lower or "yt music" in app_lower:
+        script = '''
+tell application "System Events"
+  try
+    set p to process "Web App"
+    set w to window 1 of p
+    set s to first UI element of w whose role is "AXSplitGroup"
+    set tb to first UI element of s whose role is "AXTabGroup"
+    set g1 to first UI element of tb whose role is "AXGroup"
+    set g2 to first UI element of g1 whose role is "AXGroup"
+    set sa to first UI element of g2 whose role is "AXScrollArea"
+    set wa to first UI element of sa whose role is "AXWebArea"
+    set playerBar to first UI element of wa whose description is "Player bar"
+    set likeBox to first UI element of playerBar whose description is "Like"
+    set dislikeBox to first UI element of playerBar whose description is "Dislike"
+    return ((value of likeBox as text) & "," & (value of dislikeBox as text))
+  on error
+    try
+      set likeBox to first checkbox of UI element 18 of playerBar
+      set dislikeBox to UI element 19 of playerBar
+      return ((value of likeBox as text) & "," & (value of dislikeBox as text))
+    on error
+      return "none"
+    end try
+  end try
+end tell
+'''
+        try:
+            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
+            out = res.stdout.strip()
+            if out.startswith("1,"):
+                return "liked"
+            elif out.endswith(",1"):
+                return "disliked"
+            elif out == "0,0":
+                return "none"
+        except Exception:
+            pass
+
+    if "music" in b_lower or "apple music" in app_lower:
+        script = '''
+tell application "System Events"
+  if (name of processes) contains "Music" then
+    tell application "Music"
+      if favorited of current track then return "liked"
+      if disliked of current track then return "disliked"
+      return "none"
+    end tell
+  end if
+  return "none"
+end tell
+'''
+        try:
+            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.0)
+            out = res.stdout.strip()
+            if out in ("liked", "disliked", "none"):
+                return out
+        except Exception:
+            pass
+
+    return None
+
 def main():
     data = get_nowplaying_data()
     if not data:
@@ -262,14 +327,22 @@ def main():
     app_name = get_app_name(bundle_id)
     current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
 
-    rating = None
-    if os.path.exists("/tmp/nowplaying_ratings.json"):
-        try:
-            with open("/tmp/nowplaying_ratings.json", "r") as f:
-                ratings_cache = json.load(f)
-                rating = ratings_cache.get(f"{title}___{artist}".lower())
-        except Exception:
-            pass
+    player_rating = get_player_rating(bundle_id, app_name)
+    if player_rating == "liked":
+        rating = "liked"
+    elif player_rating == "disliked":
+        rating = "disliked"
+    elif player_rating == "none":
+        rating = None
+    else:
+        rating = None
+        if os.path.exists("/tmp/nowplaying_ratings.json"):
+            try:
+                with open("/tmp/nowplaying_ratings.json", "r") as f:
+                    ratings_cache = json.load(f)
+                    rating = ratings_cache.get(f"{title}___{artist}".lower())
+            except Exception:
+                pass
 
     result = {
         "playing": True,

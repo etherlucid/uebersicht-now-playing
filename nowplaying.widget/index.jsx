@@ -77,10 +77,16 @@ export const updateState = (event, previousState) => {
       const parsed = JSON.parse(event.output || '{}');
       parsed.clientReceivedAt = Date.now();
       let updatedRatings = previousState.ratings || {};
-      if (parsed.title && parsed.rating) {
+      if (parsed.title) {
         const key = `${parsed.title}___${parsed.artist || ''}`.toLowerCase();
-        if (updatedRatings[key] !== parsed.rating) {
-          updatedRatings = { ...updatedRatings, [key]: parsed.rating };
+        if (parsed.rating !== undefined) {
+          if (parsed.rating && parsed.rating !== 'none') {
+            updatedRatings = { ...updatedRatings, [key]: parsed.rating };
+          } else {
+            const copy = { ...updatedRatings };
+            delete copy[key];
+            updatedRatings = copy;
+          }
         }
       }
       return {
@@ -99,17 +105,20 @@ export const updateState = (event, previousState) => {
 
   if (event.type === 'SET_RATING') {
     const updatedRatings = { ...(previousState.ratings || {}) };
-    if (event.rating) {
-      updatedRatings[event.trackKey] = event.rating;
-    } else {
-      delete updatedRatings[event.trackKey];
+    if (event.trackKey) {
+      if (event.rating && event.rating !== 'none') {
+        updatedRatings[event.trackKey] = event.rating;
+      } else {
+        delete updatedRatings[event.trackKey];
+      }
+      try {
+        localStorage.setItem(STORAGE_RATINGS_KEY, JSON.stringify(updatedRatings));
+      } catch (e) {}
     }
-    try {
-      localStorage.setItem(STORAGE_RATINGS_KEY, JSON.stringify(updatedRatings));
-    } catch (e) {}
     return {
       ...previousState,
       ratings: updatedRatings,
+      data: previousState.data ? { ...previousState.data, rating: event.rating } : previousState.data,
     };
   }
 
@@ -365,13 +374,16 @@ export const render = (state, dispatch) => {
     : '';
 
   const ratings = state?.ratings || {};
-  const currentRating = trackKey ? (data?.rating || ratings[trackKey]) : null;
+  const currentRating = (data && data.rating !== undefined && data.rating !== null)
+    ? (data.rating === 'none' ? null : data.rating)
+    : (trackKey ? ratings[trackKey] : null);
+
   const isLiked = currentRating === 'liked';
   const isDisliked = currentRating === 'disliked';
 
   const handleRating = (action, e) => {
     e.stopPropagation();
-    if (!isPlaying || !trackKey) return;
+    if (!isPlaying) return;
     let nextRating = null;
     if (action === 'like') {
       nextRating = isLiked ? null : 'liked';
@@ -381,7 +393,7 @@ export const render = (state, dispatch) => {
     dispatch({ type: 'SET_RATING', trackKey, rating: nextRating });
     const pyScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/media_control.py';
     const pyScriptFallback = 'nowplaying.widget/media_control.py';
-    const escapedKey = JSON.stringify(trackKey);
+    const escapedKey = JSON.stringify(trackKey || '');
     const escapedRating = JSON.stringify(nextRating || 'none');
     run(`python3 "${pyScript}" ${action} ${escapedKey} ${escapedRating} 2>/dev/null || python3 "${pyScriptFallback}" ${action} ${escapedKey} ${escapedRating} 2>/dev/null`);
   };
@@ -393,9 +405,9 @@ export const render = (state, dispatch) => {
         ...controlBtnStyle,
         ...customStyle,
         color: isLiked ? '#30d158' : 'rgba(255, 255, 255, 0.75)',
-        backgroundColor: isLiked ? 'rgba(48, 209, 88, 0.20)' : (customStyle.backgroundColor || 'rgba(255, 255, 255, 0.08)'),
-        border: isLiked ? '1px solid rgba(48, 209, 88, 0.45)' : (customStyle.border || '1px solid rgba(255, 255, 255, 0.1)'),
-        boxShadow: isLiked ? '0 0 10px rgba(48, 209, 88, 0.35)' : 'none',
+        backgroundColor: isLiked ? 'rgba(48, 209, 88, 0.16)' : (customStyle.backgroundColor || 'rgba(255, 255, 255, 0.08)'),
+        border: isLiked ? '1px solid rgba(48, 209, 88, 0.35)' : (customStyle.border || '1px solid rgba(255, 255, 255, 0.1)'),
+        boxShadow: 'none',
         opacity: isPlaying ? 1 : 0.45,
         cursor: isPlaying ? 'pointer' : 'default',
       }}
@@ -420,9 +432,9 @@ export const render = (state, dispatch) => {
         ...controlBtnStyle,
         ...customStyle,
         color: isDisliked ? '#ff453a' : 'rgba(255, 255, 255, 0.75)',
-        backgroundColor: isDisliked ? 'rgba(255, 69, 58, 0.20)' : (customStyle.backgroundColor || 'rgba(255, 255, 255, 0.08)'),
-        border: isDisliked ? '1px solid rgba(255, 69, 58, 0.45)' : (customStyle.border || '1px solid rgba(255, 255, 255, 0.1)'),
-        boxShadow: isDisliked ? '0 0 10px rgba(255, 69, 58, 0.35)' : 'none',
+        backgroundColor: isDisliked ? 'rgba(255, 69, 58, 0.16)' : (customStyle.backgroundColor || 'rgba(255, 255, 255, 0.08)'),
+        border: isDisliked ? '1px solid rgba(255, 69, 58, 0.35)' : (customStyle.border || '1px solid rgba(255, 255, 255, 0.1)'),
+        boxShadow: 'none',
         opacity: isPlaying ? 1 : 0.45,
         cursor: isPlaying ? 'pointer' : 'default',
       }}
