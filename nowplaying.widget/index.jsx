@@ -15,11 +15,9 @@ const getInitialPosition = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-        const maxX = Math.max(SCREEN_MARGIN, (window.innerWidth || 1920) - 340);
-        const maxY = Math.max(SCREEN_MARGIN, (window.innerHeight || 1080) - 180);
         return {
-          x: Math.max(SCREEN_MARGIN, Math.min(maxX, parsed.x)),
-          y: Math.max(SCREEN_MARGIN, Math.min(maxY, parsed.y)),
+          x: Math.max(SCREEN_MARGIN, parsed.x),
+          y: Math.max(SCREEN_MARGIN, parsed.y),
         };
       }
     }
@@ -302,23 +300,14 @@ export const updateState = (event, previousState) => {
 
     const newW = event.preset === 'small' ? 154 : 300;
     const newH = event.preset === 'small' ? 154 : (event.preset === 'large' ? 435 : 154);
-    const maxX = Math.max(SCREEN_MARGIN, (window.innerWidth || 1920) - newW - SCREEN_MARGIN);
-    const maxY = Math.max(SCREEN_MARGIN, (window.innerHeight || 1080) - newH - SCREEN_MARGIN);
-
-    const clampedX = Math.max(SCREEN_MARGIN, Math.min(maxX, previousState.x));
-    const clampedY = Math.max(SCREEN_MARGIN, Math.min(maxY, previousState.y));
-
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ x: clampedX, y: clampedY }));
-    } catch (e) {}
 
     return {
       ...previousState,
       sizePreset: event.preset,
       cardWidth: newW,
       cardHeight: newH,
-      x: clampedX,
-      y: clampedY,
+      x: previousState.x,
+      y: previousState.y,
       contextMenu: null,
     };
   }
