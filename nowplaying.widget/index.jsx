@@ -6,6 +6,7 @@ export const command = `python3 "$HOME/Library/Application Support/Übersicht/wi
 
 const STORAGE_KEY = 'nowplaying_widget_position';
 const STORAGE_SIZE_KEY = 'nowplaying_widget_size_preset';
+const STORAGE_RATINGS_KEY = 'nowplaying_widget_ratings';
 const SCREEN_MARGIN = 2;
 
 const getInitialPosition = () => {
@@ -36,8 +37,17 @@ const getInitialSizePreset = () => {
   return 'medium';
 };
 
+const getInitialRatings = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_RATINGS_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch (e) {}
+  return {};
+};
+
 const initialPos = getInitialPosition();
 const initialPreset = getInitialSizePreset();
+const initialRatings = getInitialRatings();
 
 export const initialState = {
   x: initialPos.x,
@@ -52,6 +62,7 @@ export const initialState = {
   cardWidth: initialPreset === 'small' ? 154 : 300,
   cardHeight: initialPreset === 'small' ? 154 : (initialPreset === 'large' ? 435 : 154),
   data: { playing: false },
+  ratings: initialRatings,
   error: null,
 };
 
@@ -65,9 +76,17 @@ export const updateState = (event, previousState) => {
     try {
       const parsed = JSON.parse(event.output || '{}');
       parsed.clientReceivedAt = Date.now();
+      let updatedRatings = previousState.ratings || {};
+      if (parsed.title && parsed.rating) {
+        const key = `${parsed.title}___${parsed.artist || ''}`.toLowerCase();
+        if (updatedRatings[key] !== parsed.rating) {
+          updatedRatings = { ...updatedRatings, [key]: parsed.rating };
+        }
+      }
       return {
         ...previousState,
         data: parsed,
+        ratings: updatedRatings,
         error: null,
       };
     } catch (err) {
@@ -76,6 +95,22 @@ export const updateState = (event, previousState) => {
         error: err.message,
       };
     }
+  }
+
+  if (event.type === 'SET_RATING') {
+    const updatedRatings = { ...(previousState.ratings || {}) };
+    if (event.rating) {
+      updatedRatings[event.trackKey] = event.rating;
+    } else {
+      delete updatedRatings[event.trackKey];
+    }
+    try {
+      localStorage.setItem(STORAGE_RATINGS_KEY, JSON.stringify(updatedRatings));
+    } catch (e) {}
+    return {
+      ...previousState,
+      ratings: updatedRatings,
+    };
   }
 
   if (event.type === 'OPTIMISTIC_TOGGLE_PLAY') {
@@ -325,6 +360,86 @@ export const render = (state, dispatch) => {
     transition: isDragging ? 'none' : 'box-shadow 0.2s ease',
   };
 
+  const trackKey = (data && data.title)
+    ? `${data.title}___${data.artist || ''}`.toLowerCase()
+    : '';
+
+  const ratings = state?.ratings || {};
+  const currentRating = trackKey ? (data?.rating || ratings[trackKey]) : null;
+  const isLiked = currentRating === 'liked';
+  const isDisliked = currentRating === 'disliked';
+
+  const handleRating = (action, e) => {
+    e.stopPropagation();
+    if (!isPlaying || !trackKey) return;
+    let nextRating = null;
+    if (action === 'like') {
+      nextRating = isLiked ? null : 'liked';
+    } else if (action === 'dislike') {
+      nextRating = isDisliked ? null : 'disliked';
+    }
+    dispatch({ type: 'SET_RATING', trackKey, rating: nextRating });
+    const pyScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/media_control.py';
+    const pyScriptFallback = 'nowplaying.widget/media_control.py';
+    const escapedKey = JSON.stringify(trackKey);
+    const escapedRating = JSON.stringify(nextRating || 'none');
+    run(`python3 "${pyScript}" ${action} ${escapedKey} ${escapedRating} 2>/dev/null || python3 "${pyScriptFallback}" ${action} ${escapedKey} ${escapedRating} 2>/dev/null`);
+  };
+
+  const renderLikeBtn = (customStyle = {}, iconSize = 14) => (
+    <button
+      data-interactive="true"
+      style={{
+        ...controlBtnStyle,
+        ...customStyle,
+        color: isLiked ? '#30d158' : 'rgba(255, 255, 255, 0.75)',
+        backgroundColor: isLiked ? 'rgba(48, 209, 88, 0.20)' : (customStyle.backgroundColor || 'rgba(255, 255, 255, 0.08)'),
+        border: isLiked ? '1px solid rgba(48, 209, 88, 0.45)' : (customStyle.border || '1px solid rgba(255, 255, 255, 0.1)'),
+        boxShadow: isLiked ? '0 0 10px rgba(48, 209, 88, 0.35)' : 'none',
+        opacity: isPlaying ? 1 : 0.45,
+        cursor: isPlaying ? 'pointer' : 'default',
+      }}
+      onClick={(e) => handleRating('like', e)}
+      onMouseDown={(e) => e.stopPropagation()}
+      title={isLiked ? 'Unlike' : 'Like'}
+    >
+      <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="currentColor">
+        {isLiked ? (
+          <path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z" />
+        ) : (
+          <path d="M9 21h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.58 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2zM9 9l4.34-4.34L12 10h9v2l-3 7H9V9zM1 9h4v12H1z" />
+        )}
+      </svg>
+    </button>
+  );
+
+  const renderDislikeBtn = (customStyle = {}, iconSize = 14) => (
+    <button
+      data-interactive="true"
+      style={{
+        ...controlBtnStyle,
+        ...customStyle,
+        color: isDisliked ? '#ff453a' : 'rgba(255, 255, 255, 0.75)',
+        backgroundColor: isDisliked ? 'rgba(255, 69, 58, 0.20)' : (customStyle.backgroundColor || 'rgba(255, 255, 255, 0.08)'),
+        border: isDisliked ? '1px solid rgba(255, 69, 58, 0.45)' : (customStyle.border || '1px solid rgba(255, 255, 255, 0.1)'),
+        boxShadow: isDisliked ? '0 0 10px rgba(255, 69, 58, 0.35)' : 'none',
+        opacity: isPlaying ? 1 : 0.45,
+        cursor: isPlaying ? 'pointer' : 'default',
+      }}
+      onClick={(e) => handleRating('dislike', e)}
+      onMouseDown={(e) => e.stopPropagation()}
+      title={isDisliked ? 'Remove Dislike' : 'Dislike'}
+    >
+      <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="currentColor">
+        {isDisliked ? (
+          <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.37-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z" />
+        ) : (
+          <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.37-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm0 12l-4.34 4.34L12 14H3v-2l3-7h9v10zm4-12h4v12h-4z" />
+        )}
+      </svg>
+    </button>
+  );
+
   return (
     <React.Fragment>
       <div
@@ -398,46 +513,48 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Mini Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+              {renderLikeBtn({ width: '20px', height: '20px' }, 11)}
               <button
                 data-interactive="true"
-                style={smallControlBtnStyle}
+                style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
                 onClick={(e) => handleControl('previous', e)}
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Previous"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </svg>
               </button>
               <button
                 data-interactive="true"
-                style={smallPlayPauseBtnStyle}
+                style={{ ...smallPlayPauseBtnStyle, width: '26px', height: '26px' }}
                 onClick={(e) => handleControl('togglePlayPause', e)}
                 onMouseDown={(e) => e.stopPropagation()}
                 title={isPlaying && !isPaused ? 'Pause' : 'Play'}
               >
                 {isPlaying && !isPaused ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="#000000">
                     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
                 ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="#000000">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 )}
               </button>
               <button
                 data-interactive="true"
-                style={smallControlBtnStyle}
+                style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
                 onClick={(e) => handleControl('next', e)}
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Next"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
+              {renderDislikeBtn({ width: '20px', height: '20px' }, 11)}
             </div>
           </div>
         ) : sizePreset === 'large' ? (
@@ -529,7 +646,8 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Large Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginTop: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', marginTop: '2px' }}>
+              {renderLikeBtn({ width: '30px', height: '30px' }, 15)}
               <button
                 data-interactive="true"
                 style={{ ...controlBtnStyle, width: '34px', height: '34px' }}
@@ -569,6 +687,7 @@ export const render = (state, dispatch) => {
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
+              {renderDislikeBtn({ width: '30px', height: '30px' }, 15)}
             </div>
           </div>
         ) : (
@@ -628,7 +747,8 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Bottom Section: Media Controls */}
-            <div style={controlsRowStyle}>
+            <div style={{ ...controlsRowStyle, gap: '12px' }}>
+              {renderLikeBtn({ width: '28px', height: '28px' }, 14)}
               <button
                 data-interactive="true"
                 style={controlBtnStyle}
@@ -668,6 +788,7 @@ export const render = (state, dispatch) => {
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
+              {renderDislikeBtn({ width: '28px', height: '28px' }, 14)}
             </div>
           </div>
         )}

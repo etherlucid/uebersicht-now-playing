@@ -262,6 +262,15 @@ def main():
     app_name = get_app_name(bundle_id)
     current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
 
+    rating = None
+    if os.path.exists("/tmp/nowplaying_ratings.json"):
+        try:
+            with open("/tmp/nowplaying_ratings.json", "r") as f:
+                ratings_cache = json.load(f)
+                rating = ratings_cache.get(f"{title}___{artist}".lower())
+        except Exception:
+            pass
+
     result = {
         "playing": True,
         "title": title,
@@ -273,6 +282,7 @@ def main():
         "artwork": artwork_url,
         "bundleId": bundle_id,
         "appName": app_name,
+        "rating": rating,
         "updatedAt": round(time.time(), 3)
     }
     print(json.dumps(result))
