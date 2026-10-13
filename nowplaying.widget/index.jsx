@@ -404,7 +404,7 @@ export const render = (state, dispatch) => {
       style={{
         ...controlBtnStyle,
         ...customStyle,
-        color: isLiked ? '#8fa876' : 'rgba(255, 255, 255, 0.75)',
+        color: isLiked ? '#78b856' : 'rgba(255, 255, 255, 0.85)',
         background: customStyle.background || 'rgba(255, 255, 255, 0.08)',
         border: customStyle.border || '1px solid rgba(255, 255, 255, 0.1)',
         boxShadow: 'none',
@@ -431,7 +431,7 @@ export const render = (state, dispatch) => {
       style={{
         ...controlBtnStyle,
         ...customStyle,
-        color: isDisliked ? '#d06f65' : 'rgba(255, 255, 255, 0.75)',
+        color: isDisliked ? '#d75444' : 'rgba(255, 255, 255, 0.85)',
         background: customStyle.background || 'rgba(255, 255, 255, 0.08)',
         border: customStyle.border || '1px solid rgba(255, 255, 255, 0.1)',
         boxShadow: 'none',
