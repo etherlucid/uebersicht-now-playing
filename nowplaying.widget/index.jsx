@@ -505,123 +505,151 @@ export const render = (state, dispatch) => {
   const renderStreamCarousel = (isSmall = false) => {
     if (!streams || streams.length <= 1) return null;
 
+    const btnSize = isSmall ? '20px' : '24px';
+    const chevronSize = isSmall ? 10 : 13;
+    const dotHeight = isSmall ? 5 : 6;
+    const dotActiveWidth = isSmall ? 14 : 18;
+    const dotInactiveWidth = isSmall ? 5 : 6;
+
     return (
       <div
         data-interactive="true"
         style={{
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: isSmall ? '4px' : '6px',
-          padding: isSmall ? '1px 5px' : '2px 8px',
-          borderRadius: '10px',
-          backgroundColor: 'rgba(255, 255, 255, 0.08)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
           userSelect: 'none',
           WebkitUserSelect: 'none',
-          margin: isSmall ? '2px auto' : '2px auto',
-          width: 'fit-content',
+          margin: isSmall ? '1px auto' : '2px auto',
+          width: '100%',
         }}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <button
-          data-interactive="true"
+        {/* Symmetric, fixed-structure carousel pill */}
+        <div
           style={{
-            background: 'none',
-            border: 'none',
-            color: 'rgba(255, 255, 255, 0.8)',
-            cursor: 'pointer',
-            padding: '0 2px',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            outline: 'none',
-            fontSize: isSmall ? '11px' : '13px',
-            lineHeight: 1,
-            fontWeight: '700',
+            gap: isSmall ? '6px' : '8px',
+            padding: isSmall ? '2px 6px' : '3px 8px',
+            borderRadius: '14px',
+            backgroundColor: 'rgba(255, 255, 255, 0.08)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
           }}
-          onClick={(e) => {
-            e.stopPropagation();
-            const nextIdx = (activeStreamIndex - 1 + streams.length) % streams.length;
-            dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
-          }}
-          title="Previous audio stream"
         >
-          ‹
-        </button>
+          {/* Previous Stream Button */}
+          <button
+            data-interactive="true"
+            style={{
+              width: btnSize,
+              height: btnSize,
+              borderRadius: '50%',
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: 'none',
+              color: 'rgba(255, 255, 255, 0.85)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              outline: 'none',
+              padding: 0,
+              transition: 'background 0.15s ease, transform 0.1s ease',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const nextIdx = (activeStreamIndex - 1 + streams.length) % streams.length;
+              dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
+            }}
+            title="Previous stream"
+          >
+            <svg width={chevronSize} height={chevronSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-          {streams.map((s, idx) => {
-            const isActive = idx === activeStreamIndex;
-            return (
-              <div
-                key={s.id || idx}
-                data-interactive="true"
-                style={{
-                  width: isActive ? (isSmall ? '10px' : '12px') : (isSmall ? '4px' : '5px'),
-                  height: isSmall ? '4px' : '5px',
-                  borderRadius: '3px',
-                  backgroundColor: isActive ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  dispatch({ type: 'SET_STREAM_INDEX', index: idx });
-                }}
-                title={`${s.appName || 'Stream'} (${idx + 1}/${streams.length})`}
-              />
-            );
-          })}
+          {/* Dots Indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '0 2px' }}>
+            {streams.map((s, idx) => {
+              const isActive = idx === activeStreamIndex;
+              return (
+                <div
+                  key={s.id || idx}
+                  data-interactive="true"
+                  style={{
+                    width: `${isActive ? dotActiveWidth : dotInactiveWidth}px`,
+                    height: `${dotHeight}px`,
+                    borderRadius: '3px',
+                    backgroundColor: isActive ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)',
+                    cursor: 'pointer',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dispatch({ type: 'SET_STREAM_INDEX', index: idx });
+                  }}
+                  title={`${s.appName || 'Stream'} (${idx + 1}/${streams.length})`}
+                />
+              );
+            })}
+          </div>
+
+          {/* Next Stream Button */}
+          <button
+            data-interactive="true"
+            style={{
+              width: btnSize,
+              height: btnSize,
+              borderRadius: '50%',
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: 'none',
+              color: 'rgba(255, 255, 255, 0.85)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              outline: 'none',
+              padding: 0,
+              transition: 'background 0.15s ease, transform 0.1s ease',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const nextIdx = (activeStreamIndex + 1) % streams.length;
+              dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
+            }}
+            title="Next stream"
+          >
+            <svg width={chevronSize} height={chevronSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
         </div>
 
-        <button
-          data-interactive="true"
+        {/* Stable Sub-Label below the pill: shows app name & stream count */}
+        <div
           style={{
-            background: 'none',
-            border: 'none',
-            color: 'rgba(255, 255, 255, 0.8)',
-            cursor: 'pointer',
-            padding: '0 2px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            outline: 'none',
-            fontSize: isSmall ? '11px' : '13px',
-            lineHeight: 1,
-            fontWeight: '700',
+            fontSize: isSmall ? '8.5px' : '9.5px',
+            fontWeight: '600',
+            color: 'rgba(255, 255, 255, 0.55)',
+            textAlign: 'center',
+            letterSpacing: '0.2px',
+            lineHeight: '1.2',
+            marginTop: '2px',
+            height: isSmall ? '11px' : '13px',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            maxWidth: isSmall ? '130px' : '260px',
           }}
-          onClick={(e) => {
-            e.stopPropagation();
-            const nextIdx = (activeStreamIndex + 1) % streams.length;
-            dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
-          }}
-          title="Next audio stream"
+          title={`${appName} (${activeStreamIndex + 1}/${streams.length})`}
         >
-          ›
-        </button>
-
-        {!isSmall && appName && (
-          <span
-            style={{
-              fontSize: '9.5px',
-              fontWeight: '600',
-              color: 'rgba(255, 255, 255, 0.65)',
-              marginLeft: '2px',
-              letterSpacing: '0.2px',
-              maxWidth: '85px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={appName}
-          >
-            {appName}
-          </span>
-        )}
+          {appName ? `${appName} (${activeStreamIndex + 1}/${streams.length})` : `Stream ${activeStreamIndex + 1} of ${streams.length}`}
+        </div>
       </div>
     );
   };
