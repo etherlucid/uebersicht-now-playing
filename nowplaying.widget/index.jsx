@@ -406,7 +406,7 @@ export const render = (state, dispatch) => {
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Previous"
               >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </svg>
               </button>
@@ -418,11 +418,11 @@ export const render = (state, dispatch) => {
                 title={isPlaying && !isPaused ? 'Pause' : 'Play'}
               >
                 {isPlaying && !isPaused ? (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
                     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
                 ) : (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 )}
@@ -434,7 +434,7 @@ export const render = (state, dispatch) => {
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Next"
               >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
@@ -537,7 +537,7 @@ export const render = (state, dispatch) => {
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Previous Track"
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </svg>
               </button>
@@ -549,11 +549,11 @@ export const render = (state, dispatch) => {
                 title={isPlaying && !isPaused ? 'Pause' : 'Play'}
               >
                 {isPlaying && !isPaused ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#000000">
                     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
                 ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#000000">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 )}
@@ -565,7 +565,7 @@ export const render = (state, dispatch) => {
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Next Track"
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
@@ -636,7 +636,7 @@ export const render = (state, dispatch) => {
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Previous Track"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </svg>
               </button>
@@ -648,11 +648,11 @@ export const render = (state, dispatch) => {
                 title={isPlaying && !isPaused ? 'Pause' : 'Play'}
               >
                 {isPlaying && !isPaused ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#000000">
                     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
                 ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#000000">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 )}
@@ -664,7 +664,7 @@ export const render = (state, dispatch) => {
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Next Track"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
