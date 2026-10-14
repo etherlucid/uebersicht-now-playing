@@ -7,8 +7,10 @@ export const command = `python3 "$HOME/Library/Application Support/Übersicht/wi
 const STORAGE_KEY = 'nowplaying_widget_position';
 const STORAGE_SIZE_KEY = 'nowplaying_widget_size_preset';
 const STORAGE_RATINGS_KEY = 'nowplaying_widget_ratings';
-const SCREEN_MARGIN = 2;
-const SNAP_THRESHOLD = 20;
+const STORAGE_SNAP_KEY = 'nowplaying_widget_enable_snap';
+const SCREEN_MARGIN = 0;
+const SNAP_THRESHOLD = 6;
+const SNAP_EDGE_TOLERANCE = 3;
 const SNAP_MARGIN_X = 15;
 const SNAP_MARGIN_TOP = 14;
 const SNAP_MARGIN_BOTTOM = 14;
@@ -17,29 +19,34 @@ const calculateSnappedPosition = (rawX, rawY, cardWidth, cardHeight, bypassSnap 
   const winW = window.innerWidth || 1920;
   const winH = window.innerHeight || 1080;
 
-  const maxX = Math.max(SCREEN_MARGIN, winW - cardWidth - SCREEN_MARGIN);
-  const maxY = Math.max(SCREEN_MARGIN, winH - cardHeight - SCREEN_MARGIN);
+  const maxX = Math.max(0, winW - cardWidth);
+  const maxY = Math.max(0, winH - cardHeight);
 
-  let newX = Math.max(SCREEN_MARGIN, Math.min(maxX, rawX));
-  let newY = Math.max(SCREEN_MARGIN, Math.min(maxY, rawY));
+  let newX = Math.max(0, Math.min(maxX, rawX));
+  let newY = Math.max(0, Math.min(maxY, rawY));
 
   if (!bypassSnap) {
     const snapTop = SNAP_MARGIN_TOP;
-    const snapBottom = Math.max(SCREEN_MARGIN, winH - cardHeight - SNAP_MARGIN_BOTTOM);
+    const snapBottom = Math.max(0, winH - cardHeight - SNAP_MARGIN_BOTTOM);
     const snapLeft = SNAP_MARGIN_X;
-    const snapRight = Math.max(SCREEN_MARGIN, winW - cardWidth - SNAP_MARGIN_X);
+    const snapRight = Math.max(0, winW - cardWidth - SNAP_MARGIN_X);
 
-    // Snap horizontally if near left/right corner snap areas
-    if (Math.abs(newX - snapLeft) <= SNAP_THRESHOLD) {
+    // Horizontal snapping:
+    // Only snap if within [snap - tolerance, snap + threshold].
+    // If pushed closer to the screen edge (< snapLeft - tolerance), snapping releases
+    // completely so the widget can be placed freely right up to the edge.
+    if (newX >= snapLeft - SNAP_EDGE_TOLERANCE && newX <= snapLeft + SNAP_THRESHOLD) {
       newX = snapLeft;
-    } else if (Math.abs(newX - snapRight) <= SNAP_THRESHOLD) {
+    } else if (newX >= snapRight - SNAP_THRESHOLD && newX <= snapRight + SNAP_EDGE_TOLERANCE) {
       newX = snapRight;
     }
 
-    // Snap vertically if near top/bottom corner snap areas
-    if (Math.abs(newY - snapTop) <= SNAP_THRESHOLD) {
+    // Vertical snapping:
+    // Only snap if within [snap - tolerance, snap + threshold].
+    // If pushed closer to top/bottom edge (< snapTop - tolerance), snapping releases.
+    if (newY >= snapTop - SNAP_EDGE_TOLERANCE && newY <= snapTop + SNAP_THRESHOLD) {
       newY = snapTop;
-    } else if (Math.abs(newY - snapBottom) <= SNAP_THRESHOLD) {
+    } else if (newY >= snapBottom - SNAP_THRESHOLD && newY <= snapBottom + SNAP_EDGE_TOLERANCE) {
       newY = snapBottom;
     }
   }
@@ -81,14 +88,26 @@ const getInitialRatings = () => {
   return {};
 };
 
+const getInitialSnapping = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_SNAP_KEY);
+    if (saved !== null) {
+      return saved === 'true';
+    }
+  } catch (e) {}
+  return true;
+};
+
 const initialPos = getInitialPosition();
 const initialPreset = getInitialSizePreset();
 const initialRatings = getInitialRatings();
+const initialSnapping = getInitialSnapping();
 
 export const initialState = {
   x: initialPos.x,
   y: initialPos.y,
   sizePreset: initialPreset,
+  enableSnapping: initialSnapping,
   contextMenu: null,
   isDragging: false,
   dragStartX: 0,
@@ -307,12 +326,13 @@ export const updateState = (event, previousState) => {
     const cardWidth = previousState.cardWidth || 300;
     const cardHeight = previousState.cardHeight || 160;
 
+    const bypassSnap = previousState.enableSnapping === false || event.bypassSnap || event.metaKey;
     const { x: newX, y: newY } = calculateSnappedPosition(
       previousState.startPosX + deltaX,
       previousState.startPosY + deltaY,
       cardWidth,
       cardHeight,
-      event.metaKey
+      bypassSnap
     );
 
     try {
@@ -323,6 +343,17 @@ export const updateState = (event, previousState) => {
       ...previousState,
       x: newX,
       y: newY,
+    };
+  }
+
+  if (event.type === 'TOGGLE_SNAPPING') {
+    const nextVal = previousState.enableSnapping === false ? true : false;
+    try {
+      localStorage.setItem(STORAGE_SNAP_KEY, String(nextVal));
+    } catch (e) {}
+    return {
+      ...previousState,
+      enableSnapping: nextVal,
     };
   }
 
@@ -395,6 +426,7 @@ export const render = (state, dispatch) => {
     y = 50,
     isDragging,
     sizePreset = 'medium',
+    enableSnapping = true,
     contextMenu = null,
   } = state || {};
 
@@ -422,7 +454,7 @@ export const render = (state, dispatch) => {
         type: 'MOVE_DRAG',
         clientX: moveEvent.clientX,
         clientY: moveEvent.clientY,
-        metaKey: moveEvent.metaKey,
+        bypassSnap: moveEvent.metaKey || moveEvent.altKey || moveEvent.shiftKey,
       });
     };
 
@@ -440,7 +472,7 @@ export const render = (state, dispatch) => {
     e.preventDefault();
     e.stopPropagation();
     const menuW = 175;
-    const menuH = 145;
+    const menuH = 215;
     const maxX = (window.innerWidth || 1920) - menuW - 12;
     const maxY = (window.innerHeight || 1080) - menuH - 12;
     dispatch({
@@ -1264,6 +1296,48 @@ export const render = (state, dispatch) => {
                 </div>
               );
             })}
+            <div
+              style={{
+                fontSize: '9.5px',
+                fontWeight: '700',
+                color: 'rgba(255, 255, 255, 0.45)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.6px',
+                padding: '6px 8px 5px 8px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                marginTop: '4px',
+                marginBottom: '4px',
+              }}
+            >
+              Snapping
+            </div>
+            <div
+              className="nowplaying-ctx-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                dispatch({ type: 'TOGGLE_SNAPPING' });
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '6px 10px',
+                borderRadius: '7px',
+                fontSize: '12px',
+                fontWeight: enableSnapping !== false ? '600' : '400',
+                color: enableSnapping !== false ? '#FFFFFF' : 'rgba(255, 255, 255, 0.82)',
+                backgroundColor: enableSnapping !== false ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
+                cursor: 'pointer',
+                margin: '1px 0',
+              }}
+            >
+              <span>Snap to Edges</span>
+              {enableSnapping !== false && (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+            </div>
           </div>
         </React.Fragment>
       )}
