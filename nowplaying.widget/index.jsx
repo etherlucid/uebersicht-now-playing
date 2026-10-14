@@ -9,8 +9,9 @@ const STORAGE_SIZE_KEY = 'nowplaying_widget_size_preset';
 const STORAGE_RATINGS_KEY = 'nowplaying_widget_ratings';
 const SCREEN_MARGIN = 2;
 const SNAP_THRESHOLD = 20;
-const SNAP_MARGIN_X = 8;
-const SNAP_MARGIN_BOTTOM = 8;
+const SNAP_MARGIN_X = 18;
+const SNAP_MARGIN_TOP = 14;
+const SNAP_MARGIN_BOTTOM = 14;
 
 const calculateSnappedPosition = (rawX, rawY, cardWidth, cardHeight, bypassSnap = false) => {
   const winW = window.innerWidth || 1920;
@@ -23,10 +24,7 @@ const calculateSnappedPosition = (rawX, rawY, cardWidth, cardHeight, bypassSnap 
   let newY = Math.max(SCREEN_MARGIN, Math.min(maxY, rawY));
 
   if (!bypassSnap) {
-    const menuBarH = (typeof window !== 'undefined' && window.screen && window.screen.availTop)
-      ? window.screen.availTop
-      : 30;
-    const snapTop = menuBarH + 8;
+    const snapTop = SNAP_MARGIN_TOP;
     const snapBottom = Math.max(SCREEN_MARGIN, winH - cardHeight - SNAP_MARGIN_BOTTOM);
     const snapLeft = SNAP_MARGIN_X;
     const snapRight = Math.max(SCREEN_MARGIN, winW - cardWidth - SNAP_MARGIN_X);
@@ -62,10 +60,7 @@ const getInitialPosition = () => {
       }
     }
   } catch (e) {}
-  const menuBarH = (typeof window !== 'undefined' && window.screen && window.screen.availTop)
-    ? window.screen.availTop
-    : 30;
-  return { x: SNAP_MARGIN_X, y: menuBarH + 8 };
+  return { x: SNAP_MARGIN_X, y: SNAP_MARGIN_TOP };
 };
 
 const getInitialSizePreset = () => {
