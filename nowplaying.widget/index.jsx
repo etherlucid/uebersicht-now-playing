@@ -9,7 +9,7 @@ const STORAGE_SIZE_KEY = 'nowplaying_widget_size_preset';
 const STORAGE_RATINGS_KEY = 'nowplaying_widget_ratings';
 const SCREEN_MARGIN = 2;
 const SNAP_THRESHOLD = 20;
-const SNAP_MARGIN_X = 18;
+const SNAP_MARGIN_X = 15;
 const SNAP_MARGIN_TOP = 14;
 const SNAP_MARGIN_BOTTOM = 14;
 
