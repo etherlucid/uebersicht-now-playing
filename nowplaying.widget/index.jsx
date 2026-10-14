@@ -8,6 +8,46 @@ const STORAGE_KEY = 'nowplaying_widget_position';
 const STORAGE_SIZE_KEY = 'nowplaying_widget_size_preset';
 const STORAGE_RATINGS_KEY = 'nowplaying_widget_ratings';
 const SCREEN_MARGIN = 2;
+const SNAP_THRESHOLD = 20;
+const SNAP_MARGIN_X = 8;
+const SNAP_MARGIN_BOTTOM = 8;
+
+const calculateSnappedPosition = (rawX, rawY, cardWidth, cardHeight, bypassSnap = false) => {
+  const winW = window.innerWidth || 1920;
+  const winH = window.innerHeight || 1080;
+
+  const maxX = Math.max(SCREEN_MARGIN, winW - cardWidth - SCREEN_MARGIN);
+  const maxY = Math.max(SCREEN_MARGIN, winH - cardHeight - SCREEN_MARGIN);
+
+  let newX = Math.max(SCREEN_MARGIN, Math.min(maxX, rawX));
+  let newY = Math.max(SCREEN_MARGIN, Math.min(maxY, rawY));
+
+  if (!bypassSnap) {
+    const menuBarH = (typeof window !== 'undefined' && window.screen && window.screen.availTop)
+      ? window.screen.availTop
+      : 30;
+    const snapTop = menuBarH + 8;
+    const snapBottom = Math.max(SCREEN_MARGIN, winH - cardHeight - SNAP_MARGIN_BOTTOM);
+    const snapLeft = SNAP_MARGIN_X;
+    const snapRight = Math.max(SCREEN_MARGIN, winW - cardWidth - SNAP_MARGIN_X);
+
+    // Snap horizontally if near left/right corner snap areas
+    if (Math.abs(newX - snapLeft) <= SNAP_THRESHOLD) {
+      newX = snapLeft;
+    } else if (Math.abs(newX - snapRight) <= SNAP_THRESHOLD) {
+      newX = snapRight;
+    }
+
+    // Snap vertically if near top/bottom corner snap areas
+    if (Math.abs(newY - snapTop) <= SNAP_THRESHOLD) {
+      newY = snapTop;
+    } else if (Math.abs(newY - snapBottom) <= SNAP_THRESHOLD) {
+      newY = snapBottom;
+    }
+  }
+
+  return { x: newX, y: newY };
+};
 
 const getInitialPosition = () => {
   try {
@@ -22,7 +62,10 @@ const getInitialPosition = () => {
       }
     }
   } catch (e) {}
-  return { x: 50, y: 50 };
+  const menuBarH = (typeof window !== 'undefined' && window.screen && window.screen.availTop)
+    ? window.screen.availTop
+    : 30;
+  return { x: SNAP_MARGIN_X, y: menuBarH + 8 };
 };
 
 const getInitialSizePreset = () => {
@@ -269,11 +312,13 @@ export const updateState = (event, previousState) => {
     const cardWidth = previousState.cardWidth || 300;
     const cardHeight = previousState.cardHeight || 160;
 
-    const maxX = Math.max(SCREEN_MARGIN, window.innerWidth - cardWidth - SCREEN_MARGIN);
-    const maxY = Math.max(SCREEN_MARGIN, window.innerHeight - cardHeight - SCREEN_MARGIN);
-
-    const newX = Math.max(SCREEN_MARGIN, Math.min(maxX, previousState.startPosX + deltaX));
-    const newY = Math.max(SCREEN_MARGIN, Math.min(maxY, previousState.startPosY + deltaY));
+    const { x: newX, y: newY } = calculateSnappedPosition(
+      previousState.startPosX + deltaX,
+      previousState.startPosY + deltaY,
+      cardWidth,
+      cardHeight,
+      event.metaKey
+    );
 
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ x: newX, y: newY }));
@@ -378,7 +423,12 @@ export const render = (state, dispatch) => {
     });
 
     const handleMouseMove = (moveEvent) => {
-      dispatch({ type: 'MOVE_DRAG', clientX: moveEvent.clientX, clientY: moveEvent.clientY });
+      dispatch({
+        type: 'MOVE_DRAG',
+        clientX: moveEvent.clientX,
+        clientY: moveEvent.clientY,
+        metaKey: moveEvent.metaKey,
+      });
     };
 
     const handleMouseUp = () => {
