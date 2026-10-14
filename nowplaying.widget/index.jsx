@@ -1431,6 +1431,11 @@ const artworkImageStyle = {
   height: '100%',
   objectFit: 'cover',
   display: 'block',
+  imageRendering: '-webkit-optimize-contrast',
+  transform: 'translateZ(0)',
+  WebkitTransform: 'translateZ(0)',
+  backfaceVisibility: 'hidden',
+  WebkitBackfaceVisibility: 'hidden',
 };
 
 const artworkFallbackStyle = {

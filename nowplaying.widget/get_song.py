@@ -13,7 +13,7 @@ CACHE_ART_FILE = "/tmp/nowplaying_art_data.txt"
 CACHE_STATE_FILE = "/tmp/nowplaying_state.json"
 CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache.json"
 CACHE_RATINGS_FILE = "/tmp/nowplaying_ratings.json"
-CACHE_ART_DIR = "/tmp/nowplaying_art_cache"
+CACHE_ART_DIR = "/tmp/nowplaying_art_cache_v2"
 CACHE_YTMUSIC_ART_FILE = "/tmp/nowplaying_ytmusic_art.txt"
 CACHE_APP_ICON_DIR = "/tmp/nowplaying_app_icons"
 CACHE_APP_ICON_SCRIPT = "/tmp/nowplaying_get_app_icon.js"
@@ -202,7 +202,32 @@ def get_track_art_cache_path(track_key):
     h = hashlib.md5(track_key.encode("utf-8", errors="ignore")).hexdigest()
     return os.path.join(CACHE_ART_DIR, f"{h}.txt")
 
-def process_artwork(data, track_key):
+def fetch_itunes_artwork(artist, title):
+    if not title:
+        return ""
+    try:
+        import urllib.request
+        import urllib.parse
+        q = f"{artist} {title}".strip()
+        url = "https://itunes.apple.com/search?" + urllib.parse.urlencode({
+            "term": q,
+            "media": "music",
+            "limit": "1"
+        })
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=1.2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = data.get("results", [])
+            if results:
+                raw_url = results[0].get("artworkUrl100", "")
+                if raw_url:
+                    # Upgrade from 100x100 to 600x600 high resolution
+                    return raw_url.replace("100x100bb", "600x600bb").replace("100x100", "600x600")
+    except Exception:
+        pass
+    return ""
+
+def process_artwork(data, track_key, artist="", title=""):
     if not track_key:
         return ""
 
@@ -213,8 +238,19 @@ def process_artwork(data, track_key):
             pass
 
     track_cache_file = get_track_art_cache_path(track_key)
-    raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData")
 
+    # 1. Fast path: return existing cached artwork for this track
+    if track_cache_file and os.path.exists(track_cache_file):
+        try:
+            with open(track_cache_file, "r") as f:
+                cached_art = f.read().strip()
+                if cached_art:
+                    return cached_art
+        except Exception:
+            pass
+
+    # 2. Process raw artwork from MediaRemote if present
+    raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData")
     if raw_art and track_cache_file:
         try:
             art_bytes = base64.b64decode(raw_art)
@@ -223,11 +259,36 @@ def process_artwork(data, track_key):
             with open(tmp_in, "wb") as f:
                 f.write(art_bytes)
 
-            subprocess.run(
-                ["sips", "-Z", "160", "-s", "format", "jpeg", tmp_in, "--out", tmp_out],
+            # Query dimensions to avoid upscaling or excessive downsampling
+            dims_proc = subprocess.run(
+                ["sips", "-1", "-g", "pixelWidth", "-g", "pixelHeight", tmp_in],
                 capture_output=True,
+                text=True,
                 timeout=1.0
             )
+            w, h = 0, 0
+            if dims_proc.returncode == 0:
+                for chunk in dims_proc.stdout.split("|"):
+                    if "pixelWidth:" in chunk:
+                        try:
+                            w = int(chunk.split(":")[1].strip())
+                        except Exception:
+                            pass
+                    elif "pixelHeight:" in chunk:
+                        try:
+                            h = int(chunk.split(":")[1].strip())
+                        except Exception:
+                            pass
+
+            max_dim = max(w, h)
+            # High-res settings: target 800px max (Retina 2x/3x for 268px card = 536-804px).
+            # Never upscale if native resolution is <= 800px (e.g. 544x544).
+            cmd = ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "85"]
+            if max_dim > 800:
+                cmd.extend(["-Z", "800"])
+            cmd.extend([tmp_in, "--out", tmp_out])
+
+            subprocess.run(cmd, capture_output=True, timeout=1.2)
 
             if os.path.exists(tmp_out):
                 with open(tmp_out, "rb") as f:
@@ -245,17 +306,7 @@ def process_artwork(data, track_key):
         except Exception:
             pass
 
-    # If raw_art was not in this payload, check if we already have it cached for this track
-    if track_cache_file and os.path.exists(track_cache_file):
-        try:
-            with open(track_cache_file, "r") as f:
-                cached_art = f.read().strip()
-                if cached_art:
-                    return cached_art
-        except Exception:
-            pass
-
-    # For YouTube Music / WebApp, fallback to dedicated YTMusic artwork cache if available
+    # 3. For YouTube Music / WebApp, fallback to dedicated YTMusic artwork cache if available
     b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower()
     if ("webapp" in b_id or "safari" in b_id or "webkit" in b_id) and os.path.exists(CACHE_YTMUSIC_ART_FILE):
         try:
@@ -265,6 +316,19 @@ def process_artwork(data, track_key):
                     return cached_yt
         except Exception:
             pass
+
+    # 4. Fallback: try iTunes Search API for 600x600 high-res cover art
+    if title:
+        itunes_art = fetch_itunes_artwork(artist, title)
+        if itunes_art:
+            try:
+                with open(track_cache_file, "w") as f:
+                    f.write(itunes_art)
+                with open(CACHE_ART_FILE, "w") as f:
+                    f.write(itunes_art)
+            except Exception:
+                pass
+            return itunes_art
 
     return ""
 
@@ -522,6 +586,8 @@ end tell
                         artwork_url = f.read().strip()
                 except Exception:
                     pass
+            if not artwork_url and title:
+                artwork_url = fetch_itunes_artwork(artist, title)
 
             return {
                 "id": "ytmusic",
@@ -579,6 +645,19 @@ end tell
             rating = "liked" if fav else ("disliked" if dis else None)
             rate = 1 if p_state == "playing" else 0
 
+            art_url = ""
+            if name:
+                am_art_key = f"{name}___{artist}___{album}"
+                am_cache_file = get_track_art_cache_path(am_art_key)
+                if am_cache_file and os.path.exists(am_cache_file):
+                    try:
+                        with open(am_cache_file, "r") as f:
+                            art_url = f.read().strip()
+                    except Exception:
+                        pass
+                if not art_url:
+                    art_url = fetch_itunes_artwork(artist, name)
+
             return {
                 "id": "apple_music",
                 "title": name,
@@ -587,7 +666,7 @@ end tell
                 "duration": round(duration, 1),
                 "elapsed": round(pos, 1),
                 "rate": rate,
-                "artwork": "",
+                "artwork": art_url,
                 "bundleId": "com.apple.Music",
                 "appName": "Apple Music",
                 "rating": rating,
@@ -786,7 +865,7 @@ def main():
 
             art_track_key = f"{title}___{artist}___{album}"
             progress_track_key = f"{uid}___{title}___{artist}___{round(duration, 1)}"
-            artwork_url = process_artwork(mr_data, art_track_key)
+            artwork_url = process_artwork(mr_data, art_track_key, artist, title)
             current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
 
             # Rating determination
