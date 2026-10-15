@@ -518,8 +518,9 @@ def get_ytmusic_rating():
     script = '''
 tell application "System Events"
   try
-    tell process "Web App"
-      set w to window 1
+    tell application process "Web App"
+      if (count of windows) is 0 then return "none"
+      set w to first window
       set s to first UI element of w whose role is "AXSplitGroup"
       set tb to first UI element of s whose role is "AXTabGroup"
       set g1 to first UI element of tb whose role is "AXGroup"
@@ -555,8 +556,9 @@ def get_ytmusic_direct_stream():
     script = '''
 tell application "System Events"
   try
-    tell process "Web App"
-      set w to window 1
+    tell application process "Web App"
+      if (count of windows) is 0 then return "none"
+      set w to first window
       set winTitle to name of w
       set s to first UI element of w whose role is "AXSplitGroup"
       set tb to first UI element of s whose role is "AXTabGroup"
@@ -925,23 +927,78 @@ def main():
             }
             streams_map[stream_id] = primary_stream
 
-    # 2. Check YouTube Music if not already updated via MediaRemote
-    if "ytmusic" not in streams_map or (primary_stream and primary_stream["id"] != "ytmusic"):
+    # 2. Check YouTube Music if running
+    if is_process_running("Web App"):
         yt_stream = get_ytmusic_direct_stream()
         if yt_stream:
-            streams_map["ytmusic"] = yt_stream
+            if "ytmusic" in streams_map:
+                existing = streams_map["ytmusic"]
+                if existing.get("artwork"):
+                    yt_stream["artwork"] = existing["artwork"]
+                if existing.get("album"):
+                    yt_stream["album"] = existing["album"]
+                if existing.get("bundleId"):
+                    yt_stream["bundleId"] = existing["bundleId"]
+                if existing.get("artist") and existing.get("artist") != existing.get("title"):
+                    yt_stream["artist"] = existing["artist"]
+                streams_map["ytmusic"] = yt_stream
+                if primary_stream and primary_stream.get("id") == "ytmusic":
+                    primary_stream["elapsed"] = yt_stream["elapsed"]
+                    primary_stream["duration"] = yt_stream["duration"]
+                    primary_stream["rate"] = yt_stream["rate"]
+                    primary_stream["rating"] = yt_stream["rating"]
+                    if yt_stream.get("title"):
+                        primary_stream["title"] = yt_stream["title"]
+                    if yt_stream.get("artist"):
+                        primary_stream["artist"] = yt_stream["artist"]
+                    new_state = {
+                        "track_id": progress_track_key,
+                        "anchor_elapsed": yt_stream["elapsed"],
+                        "anchor_time": now,
+                        "last_raw_elapsed": yt_stream["elapsed"],
+                        "last_rate": yt_stream["rate"],
+                        "last_updated": now
+                    }
+                    try:
+                        with open(CACHE_STATE_FILE, "w") as f:
+                            json.dump(new_state, f)
+                    except Exception:
+                        pass
+            else:
+                streams_map["ytmusic"] = yt_stream
 
-    # 3. Check Apple Music if not already updated via MediaRemote
-    if "apple_music" not in streams_map or (primary_stream and primary_stream["id"] != "apple_music"):
+    # 3. Check Apple Music if running
+    if is_process_running("Music"):
         am_stream = get_apple_music_stream()
         if am_stream:
-            streams_map["apple_music"] = am_stream
+            if "apple_music" in streams_map:
+                existing = streams_map["apple_music"]
+                if existing.get("artwork"):
+                    am_stream["artwork"] = existing["artwork"]
+                streams_map["apple_music"] = am_stream
+                if primary_stream and primary_stream.get("id") == "apple_music":
+                    primary_stream["elapsed"] = am_stream["elapsed"]
+                    primary_stream["duration"] = am_stream["duration"]
+                    primary_stream["rate"] = am_stream["rate"]
+                    primary_stream["rating"] = am_stream["rating"]
+            else:
+                streams_map["apple_music"] = am_stream
 
-    # 4. Check Spotify if not already updated via MediaRemote
-    if "spotify" not in streams_map or (primary_stream and primary_stream["id"] != "spotify"):
+    # 4. Check Spotify if running
+    if is_process_running("Spotify"):
         sp_stream = get_spotify_stream()
         if sp_stream:
-            streams_map["spotify"] = sp_stream
+            if "spotify" in streams_map:
+                existing = streams_map["spotify"]
+                if existing.get("artwork"):
+                    sp_stream["artwork"] = existing["artwork"]
+                streams_map["spotify"] = sp_stream
+                if primary_stream and primary_stream.get("id") == "spotify":
+                    primary_stream["elapsed"] = sp_stream["elapsed"]
+                    primary_stream["duration"] = sp_stream["duration"]
+                    primary_stream["rate"] = sp_stream["rate"]
+            else:
+                streams_map["spotify"] = sp_stream
 
 
     # Filter out dead streams

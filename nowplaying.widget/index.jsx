@@ -282,10 +282,11 @@ export const updateState = (event, previousState) => {
   }
 
   if (event.type === 'OPTIMISTIC_TOGGLE_PLAY') {
-    if (!previousState.data || !previousState.data.playing) return previousState;
+    if (!previousState.data) return previousState;
     const streams = previousState.data.streams && previousState.data.streams.length > 0
       ? previousState.data.streams
-      : [previousState.data];
+      : (previousState.data.title ? [previousState.data] : []);
+    if (streams.length === 0) return previousState;
 
     const streamIdx = event.streamIndex ?? (previousState.activeStreamIndex || 0);
     const targetStream = streams[streamIdx] || streams[0];
@@ -312,21 +313,27 @@ export const updateState = (event, previousState) => {
       return s;
     });
 
+    const isTargetActive = streamIdx === (previousState.activeStreamIndex || 0);
+
     return {
       ...previousState,
       data: {
         ...previousState.data,
-        rate: streamIdx === (previousState.activeStreamIndex || 0) ? nextRate : previousState.data.rate,
+        playing: isTargetActive ? (nextRate === 1) : previousState.data.playing,
+        rate: isTargetActive ? nextRate : previousState.data.rate,
+        elapsed: isTargetActive ? nextElapsed : previousState.data.elapsed,
+        clientReceivedAt: Date.now(),
         streams: updatedStreams,
       },
     };
   }
 
   if (event.type === 'TRACK_CHANGE_PENDING') {
-    if (!previousState.data || !previousState.data.playing) return previousState;
+    if (!previousState.data) return previousState;
     const streams = previousState.data.streams && previousState.data.streams.length > 0
       ? previousState.data.streams
-      : [previousState.data];
+      : (previousState.data.title ? [previousState.data] : []);
+    if (streams.length === 0) return previousState;
 
     const streamIdx = event.streamIndex ?? (previousState.activeStreamIndex || 0);
     const updatedStreams = streams.map((s, idx) => {
@@ -340,18 +347,25 @@ export const updateState = (event, previousState) => {
       return s;
     });
 
+    const isTargetActive = streamIdx === (previousState.activeStreamIndex || 0);
+
     return {
       ...previousState,
       data: {
         ...previousState.data,
-        elapsed: streamIdx === (previousState.activeStreamIndex || 0) ? 0 : previousState.data.elapsed,
+        elapsed: isTargetActive ? 0 : previousState.data.elapsed,
+        clientReceivedAt: Date.now(),
         streams: updatedStreams,
       },
     };
   }
 
   if (event.type === 'TICK') {
-    if (!previousState.data || !previousState.data.playing || previousState.data.rate === 0) {
+    const streams = (previousState.data && previousState.data.streams && previousState.data.streams.length > 0)
+      ? previousState.data.streams
+      : (previousState.data && previousState.data.title ? [previousState.data] : []);
+    const activeStream = streams[previousState.activeStreamIndex || 0] || previousState.data;
+    if (!activeStream || !activeStream.title || activeStream.rate === 0) {
       return previousState;
     }
     return {
@@ -598,7 +612,18 @@ export const render = (state, dispatch) => {
     const escapedApp = JSON.stringify(appName || '');
     const escapedBundle = JSON.stringify(bundleId || '');
     const escapedKey = JSON.stringify(trackKey || '');
-    run(`python3 "${pyScript}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null || python3 "${pyScriptFallback}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null`);
+    run(
+      `python3 "${pyScript}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null || python3 "${pyScriptFallback}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null`,
+      () => {
+        const songScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/get_song.py';
+        const songScriptFallback = 'nowplaying.widget/get_song.py';
+        run(`python3 "${songScript}" 2>/dev/null || python3 "${songScriptFallback}" 2>/dev/null`, (err, output) => {
+          if (!err && output) {
+            dispatch({ type: 'UB/COMMAND_RAN', output });
+          }
+        });
+      }
+    );
   };
 
   const handleRating = (action, e) => {

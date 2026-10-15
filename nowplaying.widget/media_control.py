@@ -5,7 +5,14 @@ import json
 import ctypes
 import subprocess
 
-CACHE_RATINGS_FILE = "/tmp/nowplaying_ratings.json"
+CACHE_STATE_FILE = "/tmp/nowplaying_state.json"
+
+def reset_progress_state():
+    if os.path.exists(CACHE_STATE_FILE):
+        try:
+            os.remove(CACHE_STATE_FILE)
+        except Exception:
+            pass
 
 def send_mediaremote_command(cmd_id):
     try:
@@ -78,9 +85,11 @@ end tell'''],
                 subprocess.run(["osascript", "-e", 'tell application "Music" to playpause'], timeout=1.0)
                 return {"success": True}
             elif action == "next":
+                reset_progress_state()
                 subprocess.run(["osascript", "-e", 'tell application "Music" to next track'], timeout=1.0)
                 return {"success": True}
             elif action == "previous":
+                reset_progress_state()
                 subprocess.run(["osascript", "-e", 'tell application "Music" to previous track'], timeout=1.0)
                 return {"success": True}
     except Exception:
@@ -99,9 +108,11 @@ def control_spotify(action):
                 subprocess.run(["osascript", "-e", 'tell application "Spotify" to playpause'], timeout=1.0)
                 return {"success": True}
             elif action == "next":
+                reset_progress_state()
                 subprocess.run(["osascript", "-e", 'tell application "Spotify" to next track'], timeout=1.0)
                 return {"success": True}
             elif action == "previous":
+                reset_progress_state()
                 subprocess.run(["osascript", "-e", 'tell application "Spotify" to previous track'], timeout=1.0)
                 return {"success": True}
     except Exception:
@@ -122,8 +133,9 @@ def control_ytmusic(action):
             script = f'''
 tell application "System Events"
   try
-    tell process "Web App"
-      set w to window 1
+    tell application process "Web App"
+      if (count of windows) is 0 then return "error"
+      set w to first window
       set s to first UI element of w whose role is "AXSplitGroup"
       set tb to first UI element of s whose role is "AXTabGroup"
       set g1 to first UI element of tb whose role is "AXGroup"
@@ -161,44 +173,27 @@ end tell
                 return {"success": False, "rating": None}
 
         elif action in ("toggleplaypause", "next", "previous"):
+            if action in ("previous", "next"):
+                reset_progress_state()
             script = f'''
 tell application "System Events"
   try
-    tell process "Web App"
-      set w to window 1
+    tell application process "Web App"
+      if (count of windows) is 0 then return "error"
+      set w to first window
       set s to first UI element of w whose role is "AXSplitGroup"
       set tb to first UI element of s whose role is "AXTabGroup"
       set g1 to first UI element of tb whose role is "AXGroup"
       set g2 to first UI element of g1 whose role is "AXGroup"
       set sa to first UI element of g2 whose role is "AXScrollArea"
       set wa to first UI element of sa whose role is "AXWebArea"
-      set playerBar to first UI element of wa whose description is "Player bar"
+      set pb to first UI element of wa whose description is "Player bar"
       if "{action}" is "toggleplaypause" then
-        try
-          set btn to first UI element of playerBar whose description is "Pause"
-          click btn
-        on error
-          try
-            set btn to first UI element of playerBar whose description is "Play"
-            click btn
-          on error
-            click UI element 4 of playerBar
-          end try
-        end try
+        click UI element 4 of pb
       else if "{action}" is "next" then
-        try
-          set btn to first UI element of playerBar whose description is "Next"
-          click btn
-        on error
-          click UI element 7 of playerBar
-        end try
+        click UI element 7 of pb
       else if "{action}" is "previous" then
-        try
-          set btn to first UI element of playerBar whose description is "Previous"
-          click btn
-        on error
-          click UI element 1 of playerBar
-        end try
+        click UI element 1 of pb
       end if
       return "ok"
     end tell
@@ -207,7 +202,7 @@ tell application "System Events"
   end try
 end tell
 '''
-            subprocess.run(["osascript", "-e", script], capture_output=True, timeout=1.8)
+            subprocess.run(["osascript", "-e", script], capture_output=True, timeout=1.5)
             return {"success": True}
     except Exception:
         pass
@@ -239,6 +234,9 @@ def main():
         return
 
     action = sys.argv[1].lower()
+    if action in ("previous", "next"):
+        reset_progress_state()
+
     stream_id = sys.argv[2].lower() if len(sys.argv) > 2 else ""
     app_name = sys.argv[3].lower() if len(sys.argv) > 3 else ""
     bundle_id = sys.argv[4].lower() if len(sys.argv) > 4 else ""
@@ -251,7 +249,21 @@ def main():
     result = {"success": False, "rating": None}
 
     if is_yt:
-        result = control_ytmusic(action)
+        if action in ("like", "dislike"):
+            result = control_ytmusic(action)
+        else:
+            # Native MediaRemote command for instant (<1ms) playback response
+            cmd_map = {
+                "toggleplaypause": 2, # kMRTogglePlayPause
+                "next": 4,            # kMRNextTrack
+                "previous": 5         # kMRPreviousTrack
+            }
+            cmd_id = cmd_map.get(action, 2)
+            ok = send_mediaremote_command(cmd_id)
+            if ok:
+                result = {"success": True}
+            else:
+                result = control_ytmusic(action)
     elif is_apple:
         result = control_apple_music(action)
     elif is_spotify:
