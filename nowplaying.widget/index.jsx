@@ -905,7 +905,8 @@ export const render = (state, dispatch) => {
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
-                  lineHeight: '1.25',
+                  lineHeight: '1.35',
+                  padding: '1px 0',
                 }}
                 title={title}
               >
@@ -919,6 +920,8 @@ export const render = (state, dispatch) => {
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
+                  lineHeight: '1.35',
+                  padding: '1px 0',
                   marginTop: '1px',
                 }}
                 title={artist}
@@ -1018,7 +1021,7 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Metadata */}
-            <div style={{ display: 'flex', flexDirection: 'column', height: '52px', overflow: 'hidden', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <div
                 style={{
                   fontSize: '15px',
@@ -1028,7 +1031,8 @@ export const render = (state, dispatch) => {
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   letterSpacing: '-0.3px',
-                  lineHeight: '1.25',
+                  lineHeight: '1.35',
+                  padding: '1px 0',
                 }}
                 title={title}
               >
@@ -1042,7 +1046,9 @@ export const render = (state, dispatch) => {
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
-                  marginTop: '2px',
+                  lineHeight: '1.35',
+                  padding: '1px 0',
+                  marginTop: '1px',
                 }}
                 title={artist}
               >
@@ -1051,8 +1057,9 @@ export const render = (state, dispatch) => {
               <div
                 style={{
                   fontSize: '11px',
-                  minHeight: '14px',
-                  lineHeight: '14px',
+                  lineHeight: '1.35',
+                  padding: '1px 0',
+                  minHeight: '1.35em',
                   color: isPlaying && album && album !== title ? 'rgba(255, 255, 255, 0.42)' : 'rgba(255, 255, 255, 0.28)',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
@@ -1127,9 +1134,7 @@ export const render = (state, dispatch) => {
               {renderLikeBtn({ width: '30px', height: '30px' }, 15)}
               {renderStreamChevron('right', { width: '26px', height: '26px' }, 12)}
             </div>
-            <div style={{ height: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {renderStreamDots({ margin: 0 })}
-            </div>
+            {renderStreamDots({ margin: '2px auto 0 auto' })}
           </div>
         ) : (
           /* =================================== */
@@ -1242,9 +1247,7 @@ export const render = (state, dispatch) => {
               {renderLikeBtn({ width: '26px', height: '26px' }, 13)}
               {renderStreamChevron('right', { width: '22px', height: '22px' }, 10)}
             </div>
-            <div style={{ height: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {renderStreamDots({ margin: 0 })}
-            </div>
+            {renderStreamDots({ margin: '-2px auto 0 auto' })}
           </div>
         )}
       </div>
@@ -1272,8 +1275,6 @@ const cardStyle = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
-  justifyContent: 'space-between',
-  height: '154px',
   gap: '8px',
   backgroundColor: 'rgba(24, 24, 28, 0.85)',
   backdropFilter: 'blur(30px) saturate(190%)',
@@ -1356,8 +1357,6 @@ const largeCardStyle = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
-  justifyContent: 'space-between',
-  height: '435px',
   gap: '9px',
   backgroundColor: 'rgba(24, 24, 28, 0.88)',
   backdropFilter: 'blur(30px) saturate(190%)',
@@ -1442,7 +1441,8 @@ const titleStyle = {
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   letterSpacing: '-0.2px',
-  lineHeight: '1.25',
+  lineHeight: '1.35',
+  padding: '1px 0',
 };
 
 const artistStyle = {
@@ -1452,7 +1452,9 @@ const artistStyle = {
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
-  marginTop: '2px',
+  lineHeight: '1.35',
+  padding: '1px 0',
+  marginTop: '1px',
 };
 
 const albumStyle = {
@@ -1461,6 +1463,9 @@ const albumStyle = {
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+  lineHeight: '1.35',
+  padding: '1px 0',
+  minHeight: '1.35em',
   marginTop: '1px',
 };
 
@@ -1493,7 +1498,7 @@ const progressTimesStyle = {
   color: 'rgba(255, 255, 255, 0.45)',
   fontWeight: '500',
   fontVariantNumeric: 'tabular-nums',
-  lineHeight: '1',
+  lineHeight: '1.3',
   marginTop: '2px',
 };
 
