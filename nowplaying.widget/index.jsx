@@ -878,16 +878,20 @@ export const render = (state, dispatch) => {
             )}
             {/* Artwork 56x56 */}
             <div style={smallArtworkContainerStyle}>
-              {isPlaying && currentStream?.artwork ? (
-                <img src={currentStream.artwork} alt="Album Art" style={artworkImageStyle} />
-              ) : (
-                <div style={artworkFallbackStyle}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 18V5l12-2v13" />
-                    <circle cx="6" cy="18" r="3" />
-                    <circle cx="18" cy="16" r="3" />
-                  </svg>
-                </div>
+              <div style={artworkFallbackStyle}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="16" r="3" />
+                </svg>
+              </div>
+              {isPlaying && currentStream?.artwork && (
+                <img
+                  src={currentStream.artwork}
+                  alt=""
+                  style={artworkImageStyle}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
               )}
             </div>
 
@@ -980,7 +984,9 @@ export const render = (state, dispatch) => {
               </button>
               {renderStreamChevron('right', { ...smallControlBtnStyle, width: '20px', height: '20px' }, 9)}
             </div>
-            {renderStreamDots({ margin: '2px 0 0 0' })}
+            <div style={{ height: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {renderStreamDots({ margin: 0 })}
+            </div>
           </div>
         ) : sizePreset === 'large' ? (
           /* ================================================= */
@@ -989,16 +995,20 @@ export const render = (state, dispatch) => {
           <div style={largeCardStyle}>
             {/* Big 268x268 Album Art */}
             <div style={largeArtworkContainerStyle}>
-              {isPlaying && currentStream?.artwork ? (
-                <img src={currentStream.artwork} alt="Album Art" style={artworkImageStyle} />
-              ) : (
-                <div style={{ ...artworkFallbackStyle, backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 18V5l12-2v13" />
-                    <circle cx="6" cy="18" r="3" />
-                    <circle cx="18" cy="16" r="3" />
-                  </svg>
-                </div>
+              <div style={{ ...artworkFallbackStyle, backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="16" r="3" />
+                </svg>
+              </div>
+              {isPlaying && currentStream?.artwork && (
+                <img
+                  src={currentStream.artwork}
+                  alt=""
+                  style={artworkImageStyle}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
               )}
               {(appName || appIcon) && (
                 <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 5 }}>
@@ -1008,7 +1018,7 @@ export const render = (state, dispatch) => {
             </div>
 
             {/* Metadata */}
-            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', height: '52px', overflow: 'hidden', justifyContent: 'center' }}>
               <div
                 style={{
                   fontSize: '15px',
@@ -1038,25 +1048,21 @@ export const render = (state, dispatch) => {
               >
                 {artist}
               </div>
-              {isPlaying && album && album !== title ? (
-                <div
-                  style={{
-                    fontSize: '11px',
-                    color: 'rgba(255, 255, 255, 0.42)',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    marginTop: '1px',
-                  }}
-                  title={album}
-                >
-                  {album}
-                </div>
-              ) : (
-                <div style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.28)', marginTop: '1px' }}>
-                  {isPlaying ? '' : (error ? 'Check connection' : 'No track active')}
-                </div>
-              )}
+              <div
+                style={{
+                  fontSize: '11px',
+                  minHeight: '14px',
+                  lineHeight: '14px',
+                  color: isPlaying && album && album !== title ? 'rgba(255, 255, 255, 0.42)' : 'rgba(255, 255, 255, 0.28)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  marginTop: '1px',
+                }}
+                title={isPlaying && album && album !== title ? album : undefined}
+              >
+                {isPlaying && album && album !== title ? album : (isPlaying ? '\u00A0' : (error ? 'Check connection' : 'No track active'))}
+              </div>
             </div>
 
             {/* Progress Bar */}
@@ -1121,7 +1127,9 @@ export const render = (state, dispatch) => {
               {renderLikeBtn({ width: '30px', height: '30px' }, 15)}
               {renderStreamChevron('right', { width: '26px', height: '26px' }, 12)}
             </div>
-            {renderStreamDots({ margin: '2px auto 0 auto' })}
+            <div style={{ height: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {renderStreamDots({ margin: 0 })}
+            </div>
           </div>
         ) : (
           /* =================================== */
@@ -1136,16 +1144,20 @@ export const render = (state, dispatch) => {
             {/* Top Section: Artwork + Info */}
             <div style={topRowStyle}>
               <div style={artworkContainerStyle}>
-                {isPlaying && currentStream?.artwork ? (
-                  <img src={currentStream.artwork} alt="Album Art" style={artworkImageStyle} />
-                ) : (
-                  <div style={artworkFallbackStyle}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9 18V5l12-2v13" />
-                      <circle cx="6" cy="18" r="3" />
-                      <circle cx="18" cy="16" r="3" />
-                    </svg>
-                  </div>
+                <div style={artworkFallbackStyle}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                  </svg>
+                </div>
+                {isPlaying && currentStream?.artwork && (
+                  <img
+                    src={currentStream.artwork}
+                    alt=""
+                    style={artworkImageStyle}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
                 )}
               </div>
 
@@ -1162,7 +1174,7 @@ export const render = (state, dispatch) => {
                   </div>
                 ) : (
                   <div style={{ ...albumStyle, opacity: 0.5 }}>
-                    {isPlaying ? '' : (error ? 'Check connection' : 'No track active')}
+                    {isPlaying ? '\u00A0' : (error ? 'Check connection' : 'No track active')}
                   </div>
                 )}
               </div>
@@ -1230,7 +1242,9 @@ export const render = (state, dispatch) => {
               {renderLikeBtn({ width: '26px', height: '26px' }, 13)}
               {renderStreamChevron('right', { width: '22px', height: '22px' }, 10)}
             </div>
-            {renderStreamDots({ margin: '-2px auto 0 auto' })}
+            <div style={{ height: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {renderStreamDots({ margin: 0 })}
+            </div>
           </div>
         )}
       </div>
@@ -1258,6 +1272,8 @@ const cardStyle = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
+  justifyContent: 'space-between',
+  height: '154px',
   gap: '8px',
   backgroundColor: 'rgba(24, 24, 28, 0.85)',
   backdropFilter: 'blur(30px) saturate(190%)',
@@ -1340,6 +1356,8 @@ const largeCardStyle = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
+  justifyContent: 'space-between',
+  height: '435px',
   gap: '9px',
   backgroundColor: 'rgba(24, 24, 28, 0.88)',
   backdropFilter: 'blur(30px) saturate(190%)',
@@ -1383,6 +1401,9 @@ const artworkContainerStyle = {
 };
 
 const artworkImageStyle = {
+  position: 'absolute',
+  top: 0,
+  left: 0,
   width: '100%',
   height: '100%',
   objectFit: 'cover',

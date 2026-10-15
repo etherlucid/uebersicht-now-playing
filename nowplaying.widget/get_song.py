@@ -202,29 +202,92 @@ def get_track_art_cache_path(track_key):
     h = hashlib.md5(track_key.encode("utf-8", errors="ignore")).hexdigest()
     return os.path.join(CACHE_ART_DIR, f"{h}.txt")
 
-def fetch_itunes_artwork(artist, title):
-    if not title:
+def download_and_encode_image(url, timeout=2.0):
+    if not url:
         return ""
     try:
         import urllib.request
-        import urllib.parse
-        q = f"{artist} {title}".strip()
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read()
+            if not data:
+                return ""
+            b64 = base64.b64encode(data).decode("ascii")
+            mime = "image/jpeg"
+            if data.startswith(b"\x89PNG"):
+                mime = "image/png"
+            elif data.startswith(b"GIF"):
+                mime = "image/gif"
+            elif data.startswith(b"RIFF") and b"WEBP" in data[:16]:
+                mime = "image/webp"
+            return f"data:{mime};base64,{b64}"
+    except Exception:
+        return ""
+
+def fetch_online_artwork(artist, title):
+    if not title:
+        return ""
+    import urllib.request
+    import urllib.parse
+    import re
+
+    clean_artist = re.sub(r'(\s*[-•]\s*Topic|\s*Topic\b)', '', artist or '', flags=re.I).strip()
+    clean_title = re.sub(r'(\(Official.*?\)|\[Official.*?\]|\(Audio\)|\[Audio\])', '', title or '', flags=re.I).strip()
+    query = f"{clean_artist} {clean_title}".strip() or clean_title or title or ""
+    if not query:
+        return ""
+
+    # Tier 1: iTunes Search API
+    try:
         url = "https://itunes.apple.com/search?" + urllib.parse.urlencode({
-            "term": q,
+            "term": query,
             "media": "music",
             "limit": "1"
         })
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=1.2) as resp:
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             results = data.get("results", [])
             if results:
                 raw_url = results[0].get("artworkUrl100", "")
                 if raw_url:
-                    # Upgrade from 100x100 to 600x600 high resolution
-                    return raw_url.replace("100x100bb", "600x600bb").replace("100x100", "600x600")
+                    high_res = raw_url.replace("100x100bb", "600x600bb").replace("100x100", "600x600")
+                    b64_data = download_and_encode_image(high_res, timeout=1.5)
+                    if b64_data:
+                        return b64_data
     except Exception:
         pass
+
+    # Tier 2: Deezer Search API
+    try:
+        url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            items = data.get("data", [])
+            if items:
+                img_url = items[0].get("album", {}).get("cover_xl") or items[0].get("album", {}).get("cover_big")
+                b64_data = download_and_encode_image(img_url, timeout=1.5)
+                if b64_data:
+                    return b64_data
+    except Exception:
+        pass
+
+    # Tier 3: YouTube Search
+    try:
+        url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            vids = re.findall(r'\"videoId\":\"([a-zA-Z0-9_-]{11})\"', html)
+            if vids:
+                thumb_url = f"https://i.ytimg.com/vi/{vids[0]}/hqdefault.jpg"
+                b64_data = download_and_encode_image(thumb_url, timeout=2.0)
+                if b64_data:
+                    return b64_data
+    except Exception:
+        pass
+
     return ""
 
 def process_artwork(data, track_key, artist="", title=""):
@@ -239,18 +302,18 @@ def process_artwork(data, track_key, artist="", title=""):
 
     track_cache_file = get_track_art_cache_path(track_key)
 
-    # 1. Fast path: return existing cached artwork for this track
+    # 1. Fast path: return existing cached artwork for this track (only if valid data URL)
     if track_cache_file and os.path.exists(track_cache_file):
         try:
             with open(track_cache_file, "r") as f:
                 cached_art = f.read().strip()
-                if cached_art:
+                if cached_art and cached_art.startswith("data:image/"):
                     return cached_art
         except Exception:
             pass
 
     # 2. Process raw artwork from MediaRemote if present
-    raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData")
+    raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData") if data else None
     if raw_art and track_cache_file:
         try:
             art_bytes = base64.b64decode(raw_art)
@@ -259,7 +322,6 @@ def process_artwork(data, track_key, artist="", title=""):
             with open(tmp_in, "wb") as f:
                 f.write(art_bytes)
 
-            # Query dimensions to avoid upscaling or excessive downsampling
             dims_proc = subprocess.run(
                 ["sips", "-1", "-g", "pixelWidth", "-g", "pixelHeight", tmp_in],
                 capture_output=True,
@@ -281,8 +343,6 @@ def process_artwork(data, track_key, artist="", title=""):
                             pass
 
             max_dim = max(w, h)
-            # High-res settings: target 800px max (Retina 2x/3x for 268px card = 536-804px).
-            # Never upscale if native resolution is <= 800px (e.g. 544x544).
             cmd = ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "85"]
             if max_dim > 800:
                 cmd.extend(["-Z", "800"])
@@ -298,7 +358,7 @@ def process_artwork(data, track_key, artist="", title=""):
                     f.write(artwork_data_url)
                 with open(CACHE_ART_FILE, "w") as f:
                     f.write(artwork_data_url)
-                b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower()
+                b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower() if data else ""
                 if "webapp" in b_id or "safari" in b_id or "webkit" in b_id:
                     with open(CACHE_YTMUSIC_ART_FILE, "w") as f:
                         f.write(artwork_data_url)
@@ -306,29 +366,18 @@ def process_artwork(data, track_key, artist="", title=""):
         except Exception:
             pass
 
-    # 3. For YouTube Music / WebApp, fallback to dedicated YTMusic artwork cache if available
-    b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower()
-    if ("webapp" in b_id or "safari" in b_id or "webkit" in b_id) and os.path.exists(CACHE_YTMUSIC_ART_FILE):
-        try:
-            with open(CACHE_YTMUSIC_ART_FILE, "r") as f:
-                cached_yt = f.read().strip()
-                if cached_yt:
-                    return cached_yt
-        except Exception:
-            pass
-
-    # 4. Fallback: try iTunes Search API for 600x600 high-res cover art
+    # 3. Robust online resolution (iTunes -> Deezer -> YouTube)
     if title:
-        itunes_art = fetch_itunes_artwork(artist, title)
-        if itunes_art:
+        online_art = fetch_online_artwork(artist, title)
+        if online_art and online_art.startswith("data:image/"):
             try:
                 with open(track_cache_file, "w") as f:
-                    f.write(itunes_art)
+                    f.write(online_art)
                 with open(CACHE_ART_FILE, "w") as f:
-                    f.write(itunes_art)
+                    f.write(online_art)
             except Exception:
                 pass
-            return itunes_art
+            return online_art
 
     return ""
 
@@ -564,30 +613,9 @@ end tell
             rate = 1 if pp_title.lower() == "pause" else 0
             rating = "liked" if lk_val == "1" else ("disliked" if dlk_val == "1" else None)
 
-            # Check cached artwork
-            artwork_url = ""
+            # Resolve artwork
             yt_art_key = f"{title}___{artist}___"
-            yt_cache_file = get_track_art_cache_path(yt_art_key)
-            if yt_cache_file and os.path.exists(yt_cache_file):
-                try:
-                    with open(yt_cache_file, "r") as f:
-                        artwork_url = f.read().strip()
-                except Exception:
-                    pass
-            if not artwork_url and os.path.exists(CACHE_YTMUSIC_ART_FILE):
-                try:
-                    with open(CACHE_YTMUSIC_ART_FILE, "r") as f:
-                        artwork_url = f.read().strip()
-                except Exception:
-                    pass
-            if not artwork_url and os.path.exists(CACHE_ART_FILE):
-                try:
-                    with open(CACHE_ART_FILE, "r") as f:
-                        artwork_url = f.read().strip()
-                except Exception:
-                    pass
-            if not artwork_url and title:
-                artwork_url = fetch_itunes_artwork(artist, title)
+            artwork_url = process_artwork({}, yt_art_key, artist, title)
 
             return {
                 "id": "ytmusic",
