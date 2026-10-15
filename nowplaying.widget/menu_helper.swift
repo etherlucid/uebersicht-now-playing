@@ -119,7 +119,7 @@ sizeMenu.autoenablesItems = false
 let sizeOptions: [(String, String)] = [
     ("Small (154 × 154)", "small"),
     ("Medium (300 × 154)", "medium"),
-    ("Large (300 × 435)", "large")
+    ("Large (300 × 400)", "large")
 ]
 for (label, key) in sizeOptions {
     let item = NSMenuItem(title: label, action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")

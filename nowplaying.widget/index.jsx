@@ -114,7 +114,7 @@ export const initialState = {
   startPosX: 0,
   startPosY: 0,
   cardWidth: initialPreset === 'small' ? 154 : 300,
-  cardHeight: initialPreset === 'small' ? 154 : (initialPreset === 'large' ? 435 : 154),
+  cardHeight: initialPreset === 'small' ? 154 : (initialPreset === 'large' ? 398 : 154),
   data: { playing: false, streams: [] },
   activeStreamIndex: 0,
   ratings: initialRatings,
@@ -368,7 +368,7 @@ export const updateState = (event, previousState) => {
     } catch (e) {}
 
     const newW = event.preset === 'small' ? 154 : 300;
-    const newH = event.preset === 'small' ? 154 : (event.preset === 'large' ? 435 : 154);
+    const newH = event.preset === 'small' ? 154 : (event.preset === 'large' ? 398 : 154);
 
     return {
       ...previousState,
@@ -432,7 +432,7 @@ export const render = (state, dispatch) => {
     e.preventDefault();
     const rect = e.currentTarget ? e.currentTarget.getBoundingClientRect() : null;
     const defaultW = sizePreset === 'small' ? 154 : 300;
-    const defaultH = sizePreset === 'small' ? 154 : (sizePreset === 'large' ? 435 : 154);
+    const defaultH = sizePreset === 'small' ? 154 : (sizePreset === 'large' ? 398 : 154);
     const cardWidth = rect ? rect.width : defaultW;
     const cardHeight = rect ? rect.height : defaultH;
 
@@ -1024,7 +1024,7 @@ export const render = (state, dispatch) => {
             <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <div
                 style={{
-                  fontSize: '15px',
+                  fontSize: '14.5px',
                   fontWeight: '700',
                   color: '#FFFFFF',
                   whiteSpace: 'nowrap',
@@ -1040,7 +1040,7 @@ export const render = (state, dispatch) => {
               </div>
               <div
                 style={{
-                  fontSize: '12.5px',
+                  fontSize: '12px',
                   fontWeight: '500',
                   color: 'rgba(255, 255, 255, 0.72)',
                   whiteSpace: 'nowrap',
@@ -1050,30 +1050,19 @@ export const render = (state, dispatch) => {
                   padding: '1px 0',
                   marginTop: '1px',
                 }}
-                title={artist}
+                title={isPlaying && album && album !== title ? `${artist} • ${album}` : artist}
               >
-                {artist}
-              </div>
-              <div
-                style={{
-                  fontSize: '11px',
-                  lineHeight: '1.35',
-                  padding: '1px 0',
-                  minHeight: '1.35em',
-                  color: isPlaying && album && album !== title ? 'rgba(255, 255, 255, 0.42)' : 'rgba(255, 255, 255, 0.28)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  marginTop: '1px',
-                }}
-                title={isPlaying && album && album !== title ? album : undefined}
-              >
-                {isPlaying && album && album !== title ? album : (isPlaying ? '\u00A0' : (error ? 'Check connection' : 'No track active'))}
+                <span>{artist}</span>
+                {isPlaying && album && album !== title && (
+                  <span style={{ color: 'rgba(255, 255, 255, 0.45)', marginLeft: '5px' }}>
+                    • {album}
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Progress Bar */}
-            <div style={progressSectionStyle}>
+            <div style={{ ...progressSectionStyle, gap: '2px', padding: '0 2px' }}>
               <div style={progressBarTrackStyle}>
                 <div
                   style={{
@@ -1082,57 +1071,57 @@ export const render = (state, dispatch) => {
                   }}
                 />
               </div>
-              <div style={progressTimesStyle}>
+              <div style={{ ...progressTimesStyle, marginTop: '1px' }}>
                 <span>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
                 <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
               </div>
             </div>
 
             {/* Large Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '-4px' }}>
-              {renderStreamChevron('left', { width: '26px', height: '26px' }, 12)}
-              {renderDislikeBtn({ width: '30px', height: '30px' }, 15)}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '-2px' }}>
+              {renderStreamChevron('left', { width: '24px', height: '24px' }, 11)}
+              {renderDislikeBtn({ width: '28px', height: '28px' }, 14)}
               <button
                 data-interactive="true"
-                style={{ ...controlBtnStyle, width: '34px', height: '34px' }}
+                style={{ ...controlBtnStyle, width: '32px', height: '32px' }}
                 onClick={(e) => handleControl('previous', e)}
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Previous Track"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </svg>
               </button>
               <button
                 data-interactive="true"
-                style={{ ...playPauseBtnStyle, width: '40px', height: '40px' }}
+                style={{ ...playPauseBtnStyle, width: '36px', height: '36px' }}
                 onClick={(e) => handleControl('togglePlayPause', e)}
                 onMouseDown={(e) => e.stopPropagation()}
                 title={isPlaying && !isPaused ? 'Pause' : 'Play'}
               >
                 {isPlaying && !isPaused ? (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="#000000">
                     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
                 ) : (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#000000">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="#000000">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 )}
               </button>
               <button
                 data-interactive="true"
-                style={{ ...controlBtnStyle, width: '34px', height: '34px' }}
+                style={{ ...controlBtnStyle, width: '32px', height: '32px' }}
                 onClick={(e) => handleControl('next', e)}
                 onMouseDown={(e) => e.stopPropagation()}
                 title="Next Track"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </svg>
               </button>
-              {renderLikeBtn({ width: '30px', height: '30px' }, 15)}
-              {renderStreamChevron('right', { width: '26px', height: '26px' }, 12)}
+              {renderLikeBtn({ width: '28px', height: '28px' }, 14)}
+              {renderStreamChevron('right', { width: '24px', height: '24px' }, 11)}
             </div>
             {renderStreamDots({ margin: '2px auto 0 auto' })}
           </div>
@@ -1357,11 +1346,11 @@ const largeCardStyle = {
   position: 'relative',
   display: 'flex',
   flexDirection: 'column',
-  gap: '9px',
+  gap: '6px',
   backgroundColor: 'rgba(24, 24, 28, 0.88)',
   backdropFilter: 'blur(30px) saturate(190%)',
   WebkitBackdropFilter: 'blur(30px) saturate(190%)',
-  padding: '16px',
+  padding: '13px 16px 12px 16px',
   borderRadius: '24px',
   boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.35)',
   border: '1px solid rgba(255, 255, 255, 0.12)',
