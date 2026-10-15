@@ -109,25 +109,27 @@ const calculateSnappedPosition = (rawX, rawY, cardWidth, cardHeight, bypassSnap 
   return { x: newX, y: newY };
 };
 
-const getInitialPosition = () => {
+const getScreenId = () => {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('ytmusic_widget_position');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-        return {
-          x: Math.max(SCREEN_MARGIN, parsed.x),
-          y: Math.max(SCREEN_MARGIN, parsed.y),
-        };
+    if (typeof window !== 'undefined' && window.location && window.location.pathname) {
+      const parts = window.location.pathname.split('/');
+      if (parts[1] !== undefined && parts[1] !== '') {
+        return `screen_${parts[1]}`;
       }
     }
   } catch (e) {}
-  return { x: SNAP_MARGIN_X, y: SNAP_MARGIN_TOP };
+  try {
+    if (typeof window !== 'undefined' && window.screen) {
+      return `screen_${window.screen.width}x${window.screen.height}`;
+    }
+  } catch (e) {}
+  return 'screen_0';
 };
 
 const getInitialSizePreset = () => {
+  const screenId = getScreenId();
   try {
-    const saved = localStorage.getItem(STORAGE_SIZE_KEY);
+    const saved = localStorage.getItem(`${STORAGE_SIZE_KEY}_${screenId}`) ?? localStorage.getItem(STORAGE_SIZE_KEY);
     if (saved === 'small' || saved === 'medium' || saved === 'large') {
       return saved;
     }
@@ -144,8 +146,9 @@ const getInitialRatings = () => {
 };
 
 const getInitialSnapping = () => {
+  const screenId = getScreenId();
   try {
-    const saved = localStorage.getItem(STORAGE_SNAP_KEY);
+    const saved = localStorage.getItem(`${STORAGE_SNAP_KEY}_${screenId}`) ?? localStorage.getItem(STORAGE_SNAP_KEY);
     if (saved !== null) {
       return saved === 'true';
     }
@@ -153,17 +156,79 @@ const getInitialSnapping = () => {
   return true;
 };
 
-const initialPos = getInitialPosition();
+const getInitialInstances = () => {
+  const screenId = getScreenId();
+  try {
+    const saved = localStorage.getItem(`${STORAGE_KEY}_instances_${screenId}`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {}
+
+  try {
+    const saved = localStorage.getItem(`${STORAGE_KEY}_${screenId}`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+        return [{
+          id: 'default',
+          x: Math.max(SCREEN_MARGIN, parsed.x),
+          y: Math.max(SCREEN_MARGIN, parsed.y),
+          sizePreset: getInitialSizePreset(),
+        }];
+      }
+    }
+  } catch (e) {}
+
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('ytmusic_widget_position');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+        return [{
+          id: 'default',
+          x: Math.max(SCREEN_MARGIN, parsed.x),
+          y: Math.max(SCREEN_MARGIN, parsed.y),
+          sizePreset: getInitialSizePreset(),
+        }];
+      }
+    }
+  } catch (e) {}
+
+  return [{
+    id: 'default',
+    x: SNAP_MARGIN_X,
+    y: SNAP_MARGIN_TOP,
+    sizePreset: getInitialSizePreset(),
+  }];
+};
+
+const saveInstances = (instances) => {
+  const screenId = getScreenId();
+  try {
+    localStorage.setItem(`${STORAGE_KEY}_instances_${screenId}`, JSON.stringify(instances));
+    if (instances && instances[0]) {
+      localStorage.setItem(`${STORAGE_KEY}_${screenId}`, JSON.stringify({ x: instances[0].x, y: instances[0].y }));
+    }
+  } catch (e) {}
+};
+
+const initialInstances = getInitialInstances();
 const initialPreset = getInitialSizePreset();
 const initialRatings = getInitialRatings();
 const initialSnapping = getInitialSnapping();
 
 export const initialState = {
-  x: initialPos.x,
-  y: initialPos.y,
+  instances: initialInstances,
+  x: initialInstances[0]?.x ?? SNAP_MARGIN_X,
+  y: initialInstances[0]?.y ?? SNAP_MARGIN_TOP,
   sizePreset: initialPreset,
   enableSnapping: initialSnapping,
   isDragging: false,
+  draggingInstanceId: null,
   dragStartX: 0,
   dragStartY: 0,
   startPosX: 0,
@@ -378,16 +443,17 @@ export const updateState = (event, previousState) => {
     return {
       ...previousState,
       isDragging: true,
+      draggingInstanceId: event.instanceId,
       dragStartX: event.clientX,
       dragStartY: event.clientY,
-      startPosX: previousState.x,
-      startPosY: previousState.y,
+      startPosX: event.startPosX !== undefined ? event.startPosX : previousState.x,
+      startPosY: event.startPosY !== undefined ? event.startPosY : previousState.y,
       cardWidth: event.cardWidth || previousState.cardWidth || 300,
       cardHeight: event.cardHeight || previousState.cardHeight || 160,
     };
   }
 
-  if (event.type === 'MOVE_DRAG' && previousState.isDragging) {
+  if (event.type === 'MOVE_DRAG' && previousState.isDragging && previousState.draggingInstanceId) {
     const deltaX = event.clientX - previousState.dragStartX;
     const deltaY = event.clientY - previousState.dragStartY;
     const cardWidth = previousState.cardWidth || 300;
@@ -402,20 +468,36 @@ export const updateState = (event, previousState) => {
       bypassSnap
     );
 
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ x: newX, y: newY }));
-    } catch (e) {}
+    const updatedInstances = (previousState.instances || []).map((inst) => {
+      if (inst.id === previousState.draggingInstanceId) {
+        return { ...inst, x: newX, y: newY };
+      }
+      return inst;
+    });
+
+    saveInstances(updatedInstances);
 
     return {
       ...previousState,
-      x: newX,
-      y: newY,
+      instances: updatedInstances,
+      x: updatedInstances[0]?.x ?? newX,
+      y: updatedInstances[0]?.y ?? newY,
+    };
+  }
+
+  if (event.type === 'END_DRAG') {
+    return {
+      ...previousState,
+      isDragging: false,
+      draggingInstanceId: null,
     };
   }
 
   if (event.type === 'TOGGLE_SNAPPING') {
     const nextVal = previousState.enableSnapping === false ? true : false;
+    const screenId = getScreenId();
     try {
+      localStorage.setItem(`${STORAGE_SNAP_KEY}_${screenId}`, String(nextVal));
       localStorage.setItem(STORAGE_SNAP_KEY, String(nextVal));
     } catch (e) {}
     return {
@@ -424,15 +506,19 @@ export const updateState = (event, previousState) => {
     };
   }
 
-  if (event.type === 'END_DRAG') {
-    return {
-      ...previousState,
-      isDragging: false,
-    };
-  }
-
   if (event.type === 'SET_SIZE_PRESET') {
+    const targetId = event.instanceId;
+    const updatedInstances = (previousState.instances || []).map((i) => {
+      if (i.id === targetId || !targetId) {
+        return { ...i, sizePreset: event.preset };
+      }
+      return i;
+    });
+    saveInstances(updatedInstances);
+
+    const screenId = getScreenId();
     try {
+      localStorage.setItem(`${STORAGE_SIZE_KEY}_${screenId}`, event.preset);
       localStorage.setItem(STORAGE_SIZE_KEY, event.preset);
     } catch (e) {}
 
@@ -444,28 +530,68 @@ export const updateState = (event, previousState) => {
       sizePreset: event.preset,
       cardWidth: newW,
       cardHeight: newH,
-      x: previousState.x,
-      y: previousState.y,
-    };
-  }
-
-  if (event.type === 'ORDER_CHANGED') {
-    return {
-      ...previousState,
-      orderTick: Date.now(),
+      instances: updatedInstances,
     };
   }
 
   if (event.type === 'RESET_POSITION') {
     const defaultX = SNAP_MARGIN_X;
     const defaultY = SNAP_MARGIN_TOP;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ x: defaultX, y: defaultY }));
-    } catch (e) {}
+    const targetId = event.instanceId;
+    const updatedInstances = (previousState.instances || []).map((i) => {
+      if (i.id === targetId || (!targetId && i.id === (previousState.instances?.[0]?.id || 'default'))) {
+        return { ...i, x: defaultX, y: defaultY };
+      }
+      return i;
+    });
+    saveInstances(updatedInstances);
     return {
       ...previousState,
-      x: defaultX,
-      y: defaultY,
+      instances: updatedInstances,
+      x: updatedInstances[0]?.x ?? defaultX,
+      y: updatedInstances[0]?.y ?? defaultY,
+    };
+  }
+
+  if (event.type === 'DUPLICATE_WIDGET') {
+    const current = previousState.instances && previousState.instances.length > 0
+      ? previousState.instances
+      : [{ id: 'default', x: previousState.x || SNAP_MARGIN_X, y: previousState.y || SNAP_MARGIN_TOP, sizePreset: previousState.sizePreset || 'medium' }];
+    const target = current.find(i => i.id === event.instanceId) || current[current.length - 1];
+    const newInst = {
+      ...target,
+      id: `inst_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      x: (target.x || SNAP_MARGIN_X) + 30,
+      y: (target.y || SNAP_MARGIN_TOP) + 30,
+    };
+    const updatedInstances = [...current, newInst];
+    saveInstances(updatedInstances);
+    return {
+      ...previousState,
+      instances: updatedInstances,
+    };
+  }
+
+  if (event.type === 'REMOVE_WIDGET') {
+    const current = previousState.instances || [];
+    if (current.length > 1) {
+      const updatedInstances = current.filter(i => i.id !== event.instanceId);
+      saveInstances(updatedInstances);
+      return {
+        ...previousState,
+        instances: updatedInstances,
+      };
+    } else {
+      const wid = event.widgetId || 'nowplaying-widget-index-jsx';
+      run(`osascript -e 'tell application id "tracesOf.Uebersicht" to set hidden of widget id "${wid}" to true'`);
+      return previousState;
+    }
+  }
+
+  if (event.type === 'ORDER_CHANGED') {
+    return {
+      ...previousState,
+      orderTick: Date.now(),
     };
   }
 
@@ -503,99 +629,117 @@ export const render = (state, dispatch) => {
   const {
     data,
     error,
-    x = 50,
-    y = 50,
-    isDragging,
-    sizePreset = 'medium',
+    sizePreset: defaultSizePreset = 'medium',
     enableSnapping = true,
   } = state || {};
 
-  const handleMouseDown = (e) => {
-    if (e.button !== 0) return;
-    if (e.target.closest('button') || e.target.closest('[data-interactive="true"]')) return;
+  const instances = (state && state.instances && state.instances.length > 0)
+    ? state.instances
+    : [{
+        id: 'default',
+        x: state?.x ?? SNAP_MARGIN_X,
+        y: state?.y ?? SNAP_MARGIN_TOP,
+        sizePreset: defaultSizePreset,
+        activeStreamIndex: state?.activeStreamIndex || 0,
+      }];
 
-    e.preventDefault();
-    const rect = e.currentTarget ? e.currentTarget.getBoundingClientRect() : null;
-    const defaultW = sizePreset === 'small' ? 154 : 300;
-    const defaultH = sizePreset === 'small' ? 154 : (sizePreset === 'large' ? 398 : 154);
-    const cardWidth = rect ? rect.width : defaultW;
-    const cardHeight = rect ? rect.height : defaultH;
+  return (
+    <React.Fragment>
+      {instances.map((instance) => {
+        const x = instance.x ?? 50;
+        const y = instance.y ?? 50;
+        const sizePreset = instance.sizePreset || defaultSizePreset;
+        const isDragging = state?.isDragging && state?.draggingInstanceId === instance.id;
 
-    dispatch({
-      type: 'START_DRAG',
-      clientX: e.clientX,
-      clientY: e.clientY,
-      cardWidth,
-      cardHeight,
-    });
+        const handleMouseDown = (e) => {
+          if (e.button !== 0) return;
+          if (e.target.closest('button') || e.target.closest('[data-interactive="true"]')) return;
 
-    const handleMouseMove = (moveEvent) => {
-      dispatch({
-        type: 'MOVE_DRAG',
-        clientX: moveEvent.clientX,
-        clientY: moveEvent.clientY,
-        bypassSnap: moveEvent.metaKey || moveEvent.altKey || moveEvent.shiftKey,
-      });
-    };
+          e.preventDefault();
+          const rect = e.currentTarget ? e.currentTarget.getBoundingClientRect() : null;
+          const defaultW = sizePreset === 'small' ? 154 : 300;
+          const defaultH = sizePreset === 'small' ? 154 : (sizePreset === 'large' ? 398 : 154);
+          const cardWidth = rect ? rect.width : defaultW;
+          const cardHeight = rect ? rect.height : defaultH;
 
-    const handleMouseUp = () => {
-      dispatch({ type: 'END_DRAG' });
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
+          dispatch({
+            type: 'START_DRAG',
+            instanceId: instance.id,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            startPosX: x,
+            startPosY: y,
+            cardWidth,
+            cardHeight,
+          });
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-  };
+          const handleMouseMove = (moveEvent) => {
+            dispatch({
+              type: 'MOVE_DRAG',
+              clientX: moveEvent.clientX,
+              clientY: moveEvent.clientY,
+              bypassSnap: moveEvent.metaKey || moveEvent.altKey || moveEvent.shiftKey,
+            });
+          };
 
-  const streams = (data && data.streams && data.streams.length > 0)
-    ? data.streams
-    : (data && data.title ? [data] : []);
-  const activeStreamIndex = Math.min(Math.max(0, streams.length - 1), state?.activeStreamIndex || 0);
-  const currentStream = streams[activeStreamIndex] || data || {};
+          const handleMouseUp = () => {
+            dispatch({ type: 'END_DRAG' });
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+          };
 
-  const isPlaying = Boolean(currentStream && currentStream.title && currentStream.title !== 'Nothing Playing');
-  const isPaused = Boolean(isPlaying && currentStream.rate === 0);
+          window.addEventListener('mousemove', handleMouseMove);
+          window.addEventListener('mouseup', handleMouseUp);
+        };
 
-  const duration = currentStream?.duration || 0;
-  const baseElapsed = currentStream?.elapsed || 0;
-  const timeSinceUpdate = (Date.now() - (currentStream?.clientReceivedAt || data?.clientReceivedAt || Date.now())) / 1000;
-  const elapsed = (isPlaying && !isPaused && duration > 0)
-    ? Math.min(duration, baseElapsed + Math.max(0, timeSinceUpdate))
-    : baseElapsed;
-  const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (elapsed / duration) * 100)) : 0;
+        const streams = (data && data.streams && data.streams.length > 0)
+          ? data.streams
+          : (data && data.title ? [data] : []);
+        const activeStreamIndex = Math.min(Math.max(0, streams.length - 1), instance.activeStreamIndex !== undefined ? instance.activeStreamIndex : (state?.activeStreamIndex || 0));
+        const currentStream = streams[activeStreamIndex] || data || {};
 
-  const title = isPlaying ? currentStream.title : (error ? 'Widget Error' : 'Nothing Playing');
-  const artist = isPlaying ? (currentStream.artist || 'Unknown Artist') : (error ? error : 'Playback Idle');
-  const album = isPlaying ? (currentStream.album || '') : '';
-  const appName = currentStream.appName || '';
-  const appIcon = currentStream.appIcon || data?.appIcon || '';
-  const bundleId = currentStream.bundleId || '';
-  const streamId = currentStream.id || '';
-  const supportsRating = currentStream.supportsRating ?? false;
+        const isPlaying = Boolean(currentStream && currentStream.title && currentStream.title !== 'Nothing Playing');
+        const isPaused = Boolean(isPlaying && currentStream.rate === 0);
 
-  const positionStyle = {
-    position: 'absolute',
-    top: `${y}px`,
-    left: `${x}px`,
-    zIndex: isDragging ? 9999 : getWidgetZIndex('nowplaying'),
-    cursor: isDragging ? 'grabbing' : 'grab',
-    userSelect: 'none',
-    WebkitUserSelect: 'none',
-    transition: isDragging ? 'none' : 'box-shadow 0.2s ease',
-  };
+        const duration = currentStream?.duration || 0;
+        const baseElapsed = currentStream?.elapsed || 0;
+        const timeSinceUpdate = (Date.now() - (currentStream?.clientReceivedAt || data?.clientReceivedAt || Date.now())) / 1000;
+        const elapsed = (isPlaying && !isPaused && duration > 0)
+          ? Math.min(duration, baseElapsed + Math.max(0, timeSinceUpdate))
+          : baseElapsed;
+        const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (elapsed / duration) * 100)) : 0;
 
-  const trackKey = (currentStream && currentStream.title)
-    ? `${currentStream.title}___${currentStream.artist || ''}`.toLowerCase()
-    : '';
+        const title = isPlaying ? currentStream.title : (error ? 'Widget Error' : 'Nothing Playing');
+        const artist = isPlaying ? (currentStream.artist || 'Unknown Artist') : (error ? error : 'Playback Idle');
+        const album = isPlaying ? (currentStream.album || '') : '';
+        const appName = currentStream.appName || '';
+        const appIcon = currentStream.appIcon || data?.appIcon || '';
+        const bundleId = currentStream.bundleId || '';
+        const streamId = currentStream.id || '';
+        const supportsRating = currentStream.supportsRating ?? false;
 
-  const ratings = state?.ratings || {};
-  const currentRating = (currentStream && currentStream.rating !== undefined && currentStream.rating !== null)
-    ? (currentStream.rating === 'none' ? null : currentStream.rating)
-    : (trackKey ? ratings[trackKey] : null);
+        const positionStyle = {
+          position: 'absolute',
+          top: `${y}px`,
+          left: `${x}px`,
+          zIndex: isDragging ? 9999 : getWidgetZIndex('nowplaying'),
+          cursor: isDragging ? 'grabbing' : 'grab',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          transition: isDragging ? 'none' : 'box-shadow 0.2s ease',
+        };
 
-  const isLiked = currentRating === 'liked';
-  const isDisliked = currentRating === 'disliked';
+        const trackKey = (currentStream && currentStream.title)
+          ? `${currentStream.title}___${currentStream.artist || ''}`.toLowerCase()
+          : '';
+
+        const ratings = state?.ratings || {};
+        const currentRating = (currentStream && currentStream.rating !== undefined && currentStream.rating !== null)
+          ? (currentStream.rating === 'none' ? null : currentStream.rating)
+          : (trackKey ? ratings[trackKey] : null);
+
+        const isLiked = currentRating === 'liked';
+        const isDisliked = currentRating === 'disliked';
 
   const handleControl = (action, e) => {
     if (e && e.stopPropagation) e.stopPropagation();
@@ -668,6 +812,7 @@ export const render = (state, dispatch) => {
     }));
 
     const payload = JSON.stringify({
+      instanceId: instance.id,
       sizePreset: sizePreset || 'medium',
       enableSnapping: enableSnapping !== false,
       isPlaying: Boolean(isPlaying),
@@ -692,28 +837,20 @@ export const render = (state, dispatch) => {
         if (!res || !res.action) return;
 
         if (res.action === 'SET_SIZE_PRESET') {
-          dispatch({ type: 'SET_SIZE_PRESET', preset: res.preset });
+          dispatch({ type: 'SET_SIZE_PRESET', instanceId: res.instanceId || instance.id, preset: res.preset });
         } else if (res.action === 'TOGGLE_SNAPPING') {
           dispatch({ type: 'TOGGLE_SNAPPING' });
         } else if (res.action === 'RESET_POSITION') {
-          dispatch({ type: 'RESET_POSITION' });
+          dispatch({ type: 'RESET_POSITION', instanceId: res.instanceId || instance.id });
         } else if (res.action === 'RELOAD_WIDGET') {
           const wid = res.widgetId || 'nowplaying-widget-index-jsx';
           run(`osascript -e 'tell application id "tracesOf.Uebersicht" to reload widget id "${wid}"' 2>/dev/null || osascript -e 'tell application id "tracesOf.Uebersicht" to refresh'`);
         } else if (res.action === 'REMOVE_WIDGET') {
-          const wid = res.widgetId || 'nowplaying-widget-index-jsx';
-          const dir = res.widgetDir || '';
-          const folder = res.widgetFolder || '';
-          const isDuplicate = /(-copy|\bcopy\b|-\d+)\.widget$/i.test(folder);
-          if (isDuplicate && dir) {
-            run(`osascript -e 'tell application "Finder" to delete POSIX file "${dir}"'`);
-          } else {
-            run(`osascript -e 'tell application id "tracesOf.Uebersicht" to set hidden of widget id "${wid}" to true'`);
-          }
+          dispatch({ type: 'REMOVE_WIDGET', instanceId: res.instanceId || instance.id, widgetId: res.widgetId || 'nowplaying-widget-index-jsx' });
         } else if (res.action === 'DUPLICATE_WIDGET') {
-          run(`osascript -e 'tell application id "tracesOf.Uebersicht" to refresh'`);
+          dispatch({ type: 'DUPLICATE_WIDGET', instanceId: res.instanceId || instance.id });
         } else if (res.action === 'SET_STREAM_INDEX') {
-          dispatch({ type: 'SET_STREAM_INDEX', index: res.index });
+          dispatch({ type: 'SET_STREAM_INDEX', instanceId: res.instanceId || instance.id, index: res.index });
         } else if (res.action === 'ORDER_FRONT' || res.action === 'ORDER_FORWARD' || res.action === 'ORDER_BACKWARD' || res.action === 'ORDER_BACK') {
           reorderWidget('nowplaying', res.action);
           dispatch({ type: 'ORDER_CHANGED' });
@@ -969,13 +1106,13 @@ export const render = (state, dispatch) => {
     </button>
   );
 
-  return (
-    <React.Fragment>
-      <div
-        style={positionStyle}
-        onMouseDown={handleMouseDown}
-        onContextMenu={handleContextMenu}
-      >
+        return (
+          <div
+            key={instance.id}
+            style={positionStyle}
+            onMouseDown={handleMouseDown}
+            onContextMenu={handleContextMenu}
+          >
         {sizePreset === 'small' ? (
           /* ========================================= */
           /* SMALL PRESET (~1:1 Aspect Ratio, 154x154) */
@@ -1349,7 +1486,9 @@ export const render = (state, dispatch) => {
             {renderStreamDots({ margin: '-2px auto 0 auto' })}
           </div>
         )}
-      </div>
+          </div>
+        );
+      })}
     </React.Fragment>
   );
 };
