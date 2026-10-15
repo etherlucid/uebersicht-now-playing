@@ -15,7 +15,7 @@ Queries macOS MediaRemote directly via `nowplaying-cli`, displaying playback met
   - **Small (154×154)**: Compact 1:1 square card with track art, title, artist, and compact controls.
   - **Medium (300×154)**: Standard desktop card with full metadata, progress bar, time indicators, and rating buttons.
   - **Large (300×435)**: Full-bleed poster card with prominent album artwork, expanded typography, and detailed playback controls.
-- **Stationary Anchor**: Right-click context menu lets you switch size presets seamlessly without shifting your configured top-left screen position.
+- **Native macOS Context Menu (Above All Windows)**: Right-click to trigger a native macOS `NSMenu` appearing above all application windows, featuring quick playback controls (Play/Pause, Next, Previous), multi-stream audio source selection, size presets (Small, Medium, Large), edge snapping toggle, and position reset.
 - **Smart Artwork Caching**: Artwork is cached per-track on disk to eliminate flicker, prevent phantom clearing, and protect web app art.
 - **Like / Dislike Ratings**: Dedicated rating controls with direct integration for YouTube Music and Apple Music.
 - **Draggable Anywhere**: Drag the card anywhere on screen; position is preserved across reboots and widget reloads in `localStorage`.

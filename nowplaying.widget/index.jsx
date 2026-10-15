@@ -108,7 +108,6 @@ export const initialState = {
   y: initialPos.y,
   sizePreset: initialPreset,
   enableSnapping: initialSnapping,
-  contextMenu: null,
   isDragging: false,
   dragStartX: 0,
   dragStartY: 0,
@@ -309,7 +308,6 @@ export const updateState = (event, previousState) => {
   if (event.type === 'START_DRAG') {
     return {
       ...previousState,
-      contextMenu: null,
       isDragging: true,
       dragStartX: event.clientX,
       dragStartY: event.clientY,
@@ -379,21 +377,19 @@ export const updateState = (event, previousState) => {
       cardHeight: newH,
       x: previousState.x,
       y: previousState.y,
-      contextMenu: null,
     };
   }
 
-  if (event.type === 'OPEN_CONTEXT_MENU') {
+  if (event.type === 'RESET_POSITION') {
+    const defaultX = SNAP_MARGIN_X;
+    const defaultY = SNAP_MARGIN_TOP;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ x: defaultX, y: defaultY }));
+    } catch (e) {}
     return {
       ...previousState,
-      contextMenu: { x: event.x, y: event.y },
-    };
-  }
-
-  if (event.type === 'CLOSE_CONTEXT_MENU') {
-    return {
-      ...previousState,
-      contextMenu: null,
+      x: defaultX,
+      y: defaultY,
     };
   }
 
@@ -427,7 +423,6 @@ export const render = (state, dispatch) => {
     isDragging,
     sizePreset = 'medium',
     enableSnapping = true,
-    contextMenu = null,
   } = state || {};
 
   const handleMouseDown = (e) => {
@@ -466,20 +461,6 @@ export const render = (state, dispatch) => {
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
-  };
-
-  const handleContextMenu = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const menuW = 175;
-    const menuH = 215;
-    const maxX = (window.innerWidth || 1920) - menuW - 12;
-    const maxY = (window.innerHeight || 1080) - menuH - 12;
-    dispatch({
-      type: 'OPEN_CONTEXT_MENU',
-      x: Math.max(12, Math.min(maxX, e.clientX)),
-      y: Math.max(12, Math.min(maxY, e.clientY)),
-    });
   };
 
   const streams = (data && data.streams && data.streams.length > 0)
@@ -532,7 +513,7 @@ export const render = (state, dispatch) => {
   const isDisliked = currentRating === 'disliked';
 
   const handleControl = (action, e) => {
-    e.stopPropagation();
+    if (e && e.stopPropagation) e.stopPropagation();
     if (!isPlaying) return;
     if (action === 'togglePlayPause') {
       dispatch({ type: 'OPTIMISTIC_TOGGLE_PLAY', streamIndex: activeStreamIndex });
@@ -550,7 +531,7 @@ export const render = (state, dispatch) => {
   };
 
   const handleRating = (action, e) => {
-    e.stopPropagation();
+    if (e && e.stopPropagation) e.stopPropagation();
     if (!isPlaying) return;
 
     // Do NOT optimistically set the color!
@@ -576,6 +557,59 @@ export const render = (state, dispatch) => {
         } catch (e) {}
       }
     );
+  };
+
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const streamList = (streams || []).map((s, idx) => ({
+      index: idx,
+      title: s.title || '',
+      artist: s.artist || '',
+      appName: s.appName || '',
+      isActive: idx === activeStreamIndex,
+    }));
+
+    const payload = JSON.stringify({
+      sizePreset: sizePreset || 'medium',
+      enableSnapping: enableSnapping !== false,
+      isPlaying: Boolean(isPlaying),
+      isPaused: Boolean(isPaused),
+      title: title || '',
+      artist: artist || '',
+      appName: appName || '',
+      streams: streamList,
+    });
+
+    const helperPath = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/menu_helper';
+    const fallbackPath = './nowplaying.widget/menu_helper';
+    const escapedPayload = payload.replace(/'/g, "'\\''");
+    const cmd = `"${helperPath}" '${escapedPayload}' 2>/dev/null || "${fallbackPath}" '${escapedPayload}' 2>/dev/null`;
+
+    run(cmd, (err, output) => {
+      if (err || !output) return;
+      try {
+        const res = JSON.parse(output.trim());
+        if (!res || !res.action) return;
+
+        if (res.action === 'SET_SIZE_PRESET') {
+          dispatch({ type: 'SET_SIZE_PRESET', preset: res.preset });
+        } else if (res.action === 'TOGGLE_SNAPPING') {
+          dispatch({ type: 'TOGGLE_SNAPPING' });
+        } else if (res.action === 'RESET_POSITION') {
+          dispatch({ type: 'RESET_POSITION' });
+        } else if (res.action === 'SET_STREAM_INDEX') {
+          dispatch({ type: 'SET_STREAM_INDEX', index: res.index });
+        } else if (res.action === 'CONTROL_PLAYPAUSE') {
+          handleControl('togglePlayPause');
+        } else if (res.action === 'CONTROL_NEXT') {
+          handleControl('next');
+        } else if (res.action === 'CONTROL_PREVIOUS') {
+          handleControl('previous');
+        }
+      } catch (parseErr) {}
+    });
   };
 
   const renderAppIcon = (name, iconUrl, size = 16) => {
@@ -1200,147 +1234,6 @@ export const render = (state, dispatch) => {
           </div>
         )}
       </div>
-
-      {/* Right-Click Context Menu & Dismissal Overlay */}
-      {contextMenu && (
-        <React.Fragment>
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              width: '100vw',
-              height: '100vh',
-              zIndex: 9998,
-              background: 'transparent',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              dispatch({ type: 'CLOSE_CONTEXT_MENU' });
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              dispatch({ type: 'CLOSE_CONTEXT_MENU' });
-            }}
-          />
-          <div
-            style={{
-              position: 'fixed',
-              top: `${contextMenu.y}px`,
-              left: `${contextMenu.x}px`,
-              zIndex: 9999,
-              backgroundColor: 'rgba(24, 24, 28, 0.94)',
-              backdropFilter: 'blur(30px) saturate(200%)',
-              WebkitBackdropFilter: 'blur(30px) saturate(200%)',
-              border: '1px solid rgba(255, 255, 255, 0.14)',
-              borderRadius: '13px',
-              padding: '5px',
-              boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.4)',
-              minWidth: '135px',
-              color: '#ffffff',
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-            }}
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <div
-              style={{
-                fontSize: '9.5px',
-                fontWeight: '700',
-                color: 'rgba(255, 255, 255, 0.45)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.6px',
-                padding: '4px 8px 5px 8px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-                marginBottom: '4px',
-              }}
-            >
-              Widget Size
-            </div>
-            {[
-              { id: 'small', label: 'Small' },
-              { id: 'medium', label: 'Medium' },
-              { id: 'large', label: 'Large' },
-            ].map((item) => {
-              const isSelected = (sizePreset || 'medium') === item.id;
-              return (
-                <div
-                  key={item.id}
-                  className="nowplaying-ctx-item"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    dispatch({ type: 'SET_SIZE_PRESET', preset: item.id });
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '6px 10px',
-                    borderRadius: '7px',
-                    fontSize: '12px',
-                    fontWeight: isSelected ? '600' : '400',
-                    color: isSelected ? '#FFFFFF' : 'rgba(255, 255, 255, 0.82)',
-                    backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                    cursor: 'pointer',
-                    margin: '1px 0',
-                  }}
-                >
-                  <span>{item.label}</span>
-                  {isSelected && (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  )}
-                </div>
-              );
-            })}
-            <div
-              style={{
-                fontSize: '9.5px',
-                fontWeight: '700',
-                color: 'rgba(255, 255, 255, 0.45)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.6px',
-                padding: '6px 8px 5px 8px',
-                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-                marginTop: '4px',
-                marginBottom: '4px',
-              }}
-            >
-              Snapping
-            </div>
-            <div
-              className="nowplaying-ctx-item"
-              onClick={(e) => {
-                e.stopPropagation();
-                dispatch({ type: 'TOGGLE_SNAPPING' });
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '6px 10px',
-                borderRadius: '7px',
-                fontSize: '12px',
-                fontWeight: enableSnapping !== false ? '600' : '400',
-                color: enableSnapping !== false ? '#FFFFFF' : 'rgba(255, 255, 255, 0.82)',
-                backgroundColor: enableSnapping !== false ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                cursor: 'pointer',
-                margin: '1px 0',
-              }}
-            >
-              <span>Snap to Edges</span>
-              {enableSnapping !== false && (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              )}
-            </div>
-          </div>
-        </React.Fragment>
-      )}
     </React.Fragment>
   );
 };
@@ -1357,17 +1250,6 @@ export const className = `
   }
   button:active {
     transform: scale(0.88) !important;
-  }
-
-  .nowplaying-ctx-item {
-    transition: background-color 0.1s ease, color 0.1s ease;
-  }
-  .nowplaying-ctx-item:hover {
-    background-color: rgba(255, 255, 255, 0.18) !important;
-    color: #ffffff !important;
-  }
-  .nowplaying-ctx-item:active {
-    background-color: rgba(255, 255, 255, 0.25) !important;
   }
 `;
 
