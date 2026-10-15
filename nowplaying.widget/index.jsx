@@ -15,6 +15,61 @@ const SNAP_MARGIN_X = 15;
 const SNAP_MARGIN_TOP = 14;
 const SNAP_MARGIN_BOTTOM = 14;
 
+const WIDGET_ORDER_KEY = 'uebersicht_widget_order';
+const DEFAULT_WIDGET_ORDER = ['sticker', 'cava', 'shell', 'nowplaying'];
+
+const getWidgetZIndex = (widgetId) => {
+  try {
+    const raw = localStorage.getItem(WIDGET_ORDER_KEY);
+    let order = raw ? JSON.parse(raw) : [...DEFAULT_WIDGET_ORDER];
+    if (!Array.isArray(order)) order = [...DEFAULT_WIDGET_ORDER];
+    let idx = order.indexOf(widgetId);
+    if (idx === -1) {
+      order.push(widgetId);
+      localStorage.setItem(WIDGET_ORDER_KEY, JSON.stringify(order));
+      idx = order.length - 1;
+    }
+    return 100 + idx * 50;
+  } catch (e) {
+    return 100;
+  }
+};
+
+const reorderWidget = (widgetId, action) => {
+  try {
+    const raw = localStorage.getItem(WIDGET_ORDER_KEY);
+    let order = raw ? JSON.parse(raw) : [...DEFAULT_WIDGET_ORDER];
+    if (!Array.isArray(order)) order = [...DEFAULT_WIDGET_ORDER];
+    if (!order.includes(widgetId)) {
+      order.push(widgetId);
+    }
+    const idx = order.indexOf(widgetId);
+    if (action === 'ORDER_FRONT' || action === 'BRING_TO_FRONT') {
+      order.splice(idx, 1);
+      order.push(widgetId);
+    } else if (action === 'ORDER_BACK' || action === 'SEND_TO_BACK') {
+      order.splice(idx, 1);
+      order.unshift(widgetId);
+    } else if (action === 'ORDER_FORWARD' || action === 'BRING_FORWARD') {
+      if (idx < order.length - 1) {
+        const temp = order[idx];
+        order[idx] = order[idx + 1];
+        order[idx + 1] = temp;
+      }
+    } else if (action === 'ORDER_BACKWARD' || action === 'SEND_BACKWARD') {
+      if (idx > 0) {
+        const temp = order[idx];
+        order[idx] = order[idx - 1];
+        order[idx - 1] = temp;
+      }
+    }
+    localStorage.setItem(WIDGET_ORDER_KEY, JSON.stringify(order));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('uebersicht:order-changed', { detail: { order } }));
+    }
+  } catch (e) {}
+};
+
 const calculateSnappedPosition = (rawX, rawY, cardWidth, cardHeight, bypassSnap = false) => {
   const winW = window.innerWidth || 1920;
   const winH = window.innerHeight || 1080;
@@ -380,6 +435,13 @@ export const updateState = (event, previousState) => {
     };
   }
 
+  if (event.type === 'ORDER_CHANGED') {
+    return {
+      ...previousState,
+      orderTick: Date.now(),
+    };
+  }
+
   if (event.type === 'RESET_POSITION') {
     const defaultX = SNAP_MARGIN_X;
     const defaultY = SNAP_MARGIN_TOP;
@@ -411,6 +473,15 @@ if (typeof window !== 'undefined' && !window.__nowplaying_ticker_started) {
       currentDispatch({ type: 'TICK', now: Date.now() });
     }
   }, 500);
+}
+
+if (typeof window !== 'undefined' && !window.__uebersicht_order_listener_nowplaying) {
+  window.__uebersicht_order_listener_nowplaying = true;
+  window.addEventListener('uebersicht:order-changed', () => {
+    if (currentDispatch) {
+      currentDispatch({ type: 'ORDER_CHANGED' });
+    }
+  });
 }
 
 export const render = (state, dispatch) => {
@@ -493,7 +564,7 @@ export const render = (state, dispatch) => {
     position: 'absolute',
     top: `${y}px`,
     left: `${x}px`,
-    zIndex: 1000,
+    zIndex: isDragging ? 9999 : getWidgetZIndex('nowplaying'),
     cursor: isDragging ? 'grabbing' : 'grab',
     userSelect: 'none',
     WebkitUserSelect: 'none',
@@ -601,12 +672,9 @@ export const render = (state, dispatch) => {
           dispatch({ type: 'RESET_POSITION' });
         } else if (res.action === 'SET_STREAM_INDEX') {
           dispatch({ type: 'SET_STREAM_INDEX', index: res.index });
-        } else if (res.action === 'CONTROL_PLAYPAUSE') {
-          handleControl('togglePlayPause');
-        } else if (res.action === 'CONTROL_NEXT') {
-          handleControl('next');
-        } else if (res.action === 'CONTROL_PREVIOUS') {
-          handleControl('previous');
+        } else if (res.action === 'ORDER_FRONT' || res.action === 'ORDER_FORWARD' || res.action === 'ORDER_BACKWARD' || res.action === 'ORDER_BACK') {
+          reorderWidget('nowplaying', res.action);
+          dispatch({ type: 'ORDER_CHANGED' });
         }
       } catch (parseErr) {}
     });

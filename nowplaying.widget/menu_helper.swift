@@ -69,26 +69,23 @@ if isPlaying, let title = state.title, !title.isEmpty {
 
 menu.addItem(NSMenuItem.separator())
 
-// Playback Controls (when playing)
-if isPlaying {
-    let playPauseTitle = isPaused ? "▶  Play" : "⏸  Pause"
-    let playPauseItem = NSMenuItem(title: playPauseTitle, action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
-    playPauseItem.target = delegate
-    playPauseItem.representedObject = "{\"action\":\"CONTROL_PLAYPAUSE\"}"
-    menu.addItem(playPauseItem)
-
-    let nextItem = NSMenuItem(title: "⏭  Next Track", action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
-    nextItem.target = delegate
-    nextItem.representedObject = "{\"action\":\"CONTROL_NEXT\"}"
-    menu.addItem(nextItem)
-
-    let prevItem = NSMenuItem(title: "⏮  Previous Track", action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
-    prevItem.target = delegate
-    prevItem.representedObject = "{\"action\":\"CONTROL_PREVIOUS\"}"
-    menu.addItem(prevItem)
-
-    menu.addItem(NSMenuItem.separator())
+// Size Options (Top-level, matching native Apple presentation without pixel size)
+let sizeOptions: [(String, String)] = [
+    ("Small", "small"),
+    ("Medium", "medium"),
+    ("Large", "large")
+]
+for (label, key) in sizeOptions {
+    let item = NSMenuItem(title: label, action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
+    item.target = delegate
+    item.representedObject = "{\"action\":\"SET_SIZE_PRESET\",\"preset\":\"\(key)\"}"
+    if currentPreset == key {
+        item.state = .on
+    }
+    menu.addItem(item)
 }
+
+menu.addItem(NSMenuItem.separator())
 
 // Multi-stream audio source submenu (if more than 1 stream)
 if let streams = state.streams, streams.count > 1 {
@@ -112,26 +109,24 @@ if let streams = state.streams, streams.count > 1 {
     menu.addItem(streamParent)
 }
 
-// Widget Size Submenu
-let sizeParent = NSMenuItem(title: "Widget Size", action: nil, keyEquivalent: "")
-let sizeMenu = NSMenu(title: "Widget Size")
-sizeMenu.autoenablesItems = false
-let sizeOptions: [(String, String)] = [
-    ("Small (154 × 154)", "small"),
-    ("Medium (300 × 154)", "medium"),
-    ("Large (300 × 400)", "large")
+// Order Submenu
+let orderParent = NSMenuItem(title: "Order", action: nil, keyEquivalent: "")
+let orderMenu = NSMenu(title: "Order")
+orderMenu.autoenablesItems = false
+let orderOptions: [(String, String)] = [
+    ("Bring to Front", "ORDER_FRONT"),
+    ("Bring Forward", "ORDER_FORWARD"),
+    ("Send Backward", "ORDER_BACKWARD"),
+    ("Send to Back", "ORDER_BACK")
 ]
-for (label, key) in sizeOptions {
+for (label, act) in orderOptions {
     let item = NSMenuItem(title: label, action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
     item.target = delegate
-    item.representedObject = "{\"action\":\"SET_SIZE_PRESET\",\"preset\":\"\(key)\"}"
-    if currentPreset == key {
-        item.state = .on
-    }
-    sizeMenu.addItem(item)
+    item.representedObject = "{\"action\":\"\(act)\"}"
+    orderMenu.addItem(item)
 }
-sizeParent.submenu = sizeMenu
-menu.addItem(sizeParent)
+orderParent.submenu = orderMenu
+menu.addItem(orderParent)
 
 // Snapping Toggle
 let snapItem = NSMenuItem(title: "Snap to Edges", action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
