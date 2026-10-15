@@ -48,27 +48,6 @@ let delegate = MenuDelegate()
 let menu = NSMenu(title: "Now Playing Controls")
 menu.autoenablesItems = false
 
-// Header Item
-var headerTitle = "🎵 Now Playing"
-if let appName = state.appName, !appName.isEmpty {
-    headerTitle = "🎵 Now Playing (\(appName))"
-}
-let header = NSMenuItem(title: headerTitle, action: nil, keyEquivalent: "")
-header.isEnabled = false
-menu.addItem(header)
-
-// If track is playing, show track title/artist (truncated if too long) as disabled subtitle
-if isPlaying, let title = state.title, !title.isEmpty {
-    let artist = state.artist ?? ""
-    let subtitleText = (artist.isEmpty || artist == "Playback Idle") ? title : "\(title) – \(artist)"
-    let truncatedSubtitle = subtitleText.count > 36 ? String(subtitleText.prefix(33)) + "…" : subtitleText
-    let trackItem = NSMenuItem(title: truncatedSubtitle, action: nil, keyEquivalent: "")
-    trackItem.isEnabled = false
-    menu.addItem(trackItem)
-}
-
-menu.addItem(NSMenuItem.separator())
-
 // Size Options (Top-level, matching native Apple presentation without pixel size)
 let sizeOptions: [(String, String)] = [
     ("Small", "small"),
