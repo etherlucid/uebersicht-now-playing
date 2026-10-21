@@ -520,17 +520,26 @@ tell application "System Events"
   try
     tell application process "Web App"
       if (count of windows) is 0 then return "none"
-      set w to first window
-      set s to first UI element of w whose role is "AXSplitGroup"
-      set tb to first UI element of s whose role is "AXTabGroup"
-      set g1 to first UI element of tb whose role is "AXGroup"
-      set g2 to first UI element of g1 whose role is "AXGroup"
-      set sa to first UI element of g2 whose role is "AXScrollArea"
-      set wa to first UI element of sa whose role is "AXWebArea"
-      set playerBar to first UI element of wa whose description is "Player bar"
-      set likeBox to first checkbox of UI element 18 of playerBar
-      set dislikeBox to UI element 19 of playerBar
-      return ((value of likeBox as text) & "," & (value of dislikeBox as text))
+      tell window 1
+        set s to first UI element whose role is "AXSplitGroup"
+        set tb to first UI element of s whose role is "AXTabGroup"
+        set g1 to first UI element of tb whose role is "AXGroup"
+        set g2 to first UI element of g1 whose role is "AXGroup"
+        set sa to first UI element of g2 whose role is "AXScrollArea"
+        set wa to first UI element of sa whose role is "AXWebArea"
+        set playerBar to first UI element of wa whose description is "Player bar"
+        set lk to "0"
+        try
+          set likeBox to first UI element of (UI element 14 of playerBar) whose role is "AXCheckBox"
+          set lk to value of likeBox as text
+        end try
+        set dlk to "0"
+        try
+          set dislikeBox to UI element 15 of playerBar
+          set dlk to value of dislikeBox as text
+        end try
+        return (lk & "," & dlk)
+      end tell
     end tell
   on error
     return "none"
@@ -558,22 +567,31 @@ tell application "System Events"
   try
     tell application process "Web App"
       if (count of windows) is 0 then return "none"
-      set w to first window
-      set winTitle to name of w
-      set s to first UI element of w whose role is "AXSplitGroup"
-      set tb to first UI element of s whose role is "AXTabGroup"
-      set g1 to first UI element of tb whose role is "AXGroup"
-      set g2 to first UI element of g1 whose role is "AXGroup"
-      set sa to first UI element of g2 whose role is "AXScrollArea"
-      set wa to first UI element of sa whose role is "AXWebArea"
-      set pb to first UI element of wa whose description is "Player bar"
-      set t to title of UI element 12 of pb
-      set a to title of UI element 15 of pb
-      set tm to value of UI element 10 of pb
-      set pp to title of UI element 4 of pb
-      set lk to value of first checkbox of UI element 18 of pb
-      set dlk to value of UI element 19 of pb
-      return (t & "|||" & a & "|||" & tm & "|||" & pp & "|||" & (lk as text) & "|||" & (dlk as text) & "|||" & winTitle)
+      tell window 1
+        set winTitle to name
+        set s to first UI element whose role is "AXSplitGroup"
+        set tb to first UI element of s whose role is "AXTabGroup"
+        set g1 to first UI element of tb whose role is "AXGroup"
+        set g2 to first UI element of g1 whose role is "AXGroup"
+        set sa to first UI element of g2 whose role is "AXScrollArea"
+        set wa to first UI element of sa whose role is "AXWebArea"
+        set pb to first UI element of wa whose description is "Player bar"
+        set t to title of first UI element of pb whose role is "AXHeading"
+        set a to value of UI element 13 of pb
+        set tm to value of UI element 10 of pb
+        set pp to title of UI element 4 of pb
+        set lk to "0"
+        try
+          set lkBtn to first UI element of (UI element 14 of pb) whose role is "AXCheckBox"
+          set lk to value of lkBtn as text
+        end try
+        set dlk to "0"
+        try
+          set dlkBtn to UI element 15 of pb
+          set dlk to value of dlkBtn as text
+        end try
+        return (t & "|||" & a & "|||" & tm & "|||" & pp & "|||" & lk & "|||" & dlk & "|||" & winTitle)
+      end tell
     end tell
   on error
     return "none"
