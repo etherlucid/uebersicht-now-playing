@@ -241,19 +241,25 @@ tell application "System Events"
         set sa to first UI element of g2 whose role is "AXScrollArea"
         set wa to first UI element of sa whose role is "AXWebArea"
         set pb to first UI element of wa whose description is "Player bar"
-        if "{action}" is "like" then
-          set lkBtn to first UI element of (UI element 14 of pb) whose role is "AXCheckBox"
-          set oldVal to value of lkBtn as text
-          click lkBtn
-          if oldVal is "1" then return "0"
-          return "1"
-        else
-          set dlkBtn to UI element 15 of pb
-          set oldVal to value of dlkBtn as text
-          click dlkBtn
-          if oldVal is "1" then return "0"
-          return "1"
-        end if
+        
+        set els to UI elements of pb
+        set c to count of els
+        repeat with i from 14 to c
+          set el to item i of els
+          if role of el is "AXCheckBox" then
+            if "{action}" is "dislike" then
+              click el
+              delay 0.2
+              return (value of el as text)
+            else
+              set lkBtn to first UI element of (item (i - 1) of els)
+              click lkBtn
+              delay 0.2
+              return (value of lkBtn as text)
+            end if
+          end if
+        end repeat
+        return "error"
       end tell
     end tell
   on error
@@ -262,7 +268,7 @@ tell application "System Events"
   return "error"
 end tell
 '''
-            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.8)
+            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=4.0)
             val = res.stdout.strip()
             if val == "1":
                 return {"success": True, "rating": "liked" if action == "like" else "disliked"}
@@ -288,11 +294,14 @@ tell application "System Events"
         set wa to first UI element of sa whose role is "AXWebArea"
         set pb to first UI element of wa whose description is "Player bar"
         if "{action}" is in {{"toggleplaypause", "playpause", "play", "pause"}} then
-          click UI element 4 of pb
+          set ppBtn to first UI element of pb whose (role is "AXButton" and (title is in {{"Play", "Pause"}} or description is in {{"Play", "Pause"}}))
+          click ppBtn
         else if "{action}" is "next" then
-          click UI element 7 of pb
+          set nextBtn to first UI element of pb whose (role is "AXButton" and (title is "Next" or description is "Next"))
+          click nextBtn
         else if "{action}" is "previous" then
-          click UI element 1 of pb
+          set prevBtn to first UI element of pb whose (role is "AXButton" and (title is "Previous" or description is "Previous"))
+          click prevBtn
         end if
       end tell
       return "ok"

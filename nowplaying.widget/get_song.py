@@ -527,18 +527,22 @@ tell application "System Events"
         set g2 to first UI element of g1 whose role is "AXGroup"
         set sa to first UI element of g2 whose role is "AXScrollArea"
         set wa to first UI element of sa whose role is "AXWebArea"
-        set playerBar to first UI element of wa whose description is "Player bar"
-        set lk to "0"
-        try
-          set likeBox to first UI element of (UI element 14 of playerBar) whose role is "AXCheckBox"
-          set lk to value of likeBox as text
-        end try
-        set dlk to "0"
-        try
-          set dislikeBox to UI element 15 of playerBar
-          set dlk to value of dislikeBox as text
-        end try
-        return (lk & "," & dlk)
+        set pb to first UI element of wa whose description is "Player bar"
+        
+        set els to UI elements of pb
+        set c to count of els
+        repeat with i from 14 to c
+          set el to item i of els
+          if role of el is "AXCheckBox" then
+            set dlkVal to value of el as text
+            set lkVal to "0"
+            try
+              set lkVal to value of (first UI element of (item (i - 1) of els)) as text
+            end try
+            return (lkVal & "," & dlkVal)
+          end if
+        end repeat
+        return "none"
       end tell
     end tell
   on error
@@ -547,7 +551,7 @@ tell application "System Events"
 end tell
 '''
     try:
-        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=2.5)
         out = res.stdout.strip()
         if out.startswith("1,"):
             return "liked"
@@ -576,21 +580,57 @@ tell application "System Events"
         set sa to first UI element of g2 whose role is "AXScrollArea"
         set wa to first UI element of sa whose role is "AXWebArea"
         set pb to first UI element of wa whose description is "Player bar"
-        set t to title of first UI element of pb whose role is "AXHeading"
-        set a to value of UI element 13 of pb
-        set tm to value of UI element 10 of pb
-        set pp to title of UI element 4 of pb
+        
+        set t to ""
+        try
+          set hdgs to every UI element of pb whose role is "AXHeading"
+          if (count of hdgs) > 0 then
+            set t to title of item 1 of hdgs as text
+          end if
+        end try
+        
+        set lnks to every UI element of pb whose role is "AXLink"
+        set a to ""
+        set al to ""
+        if (count of lnks) > 0 then
+          set a to title of item 1 of lnks
+          if (count of lnks) > 1 then
+            set al to title of item 2 of lnks
+          end if
+        end if
+        if a is "" then
+          try
+            set a to value of UI element 13 of pb
+          end try
+        end if
+        
+        set tm to ""
+        try
+          set tmEl to first UI element of pb whose (role is "AXStaticText" and value contains " / ")
+          set tm to value of tmEl as text
+        end try
+        
+        set pp to "Play"
+        try
+          set ppBtn to first UI element of pb whose (role is "AXButton" and (title is in {"Play", "Pause"} or description is in {"Play", "Pause"}))
+          set pp to description of ppBtn as text
+          if pp is "" then set pp to title of ppBtn as text
+        end try
+        
         set lk to "0"
-        try
-          set lkBtn to first UI element of (UI element 14 of pb) whose role is "AXCheckBox"
-          set lk to value of lkBtn as text
-        end try
         set dlk to "0"
-        try
-          set dlkBtn to UI element 15 of pb
-          set dlk to value of dlkBtn as text
-        end try
-        return (t & "|||" & a & "|||" & tm & "|||" & pp & "|||" & lk & "|||" & dlk & "|||" & winTitle)
+        repeat with i from 14 to c
+          set el to item i of els
+          if role of el is "AXCheckBox" then
+            set dlk to value of el as text
+            try
+              set lk to value of (first UI element of (item (i - 1) of els)) as text
+            end try
+            exit repeat
+          end if
+        end repeat
+        
+        return (t & "|||" & a & "|||" & tm & "|||" & pp & "|||" & lk & "|||" & dlk & "|||" & winTitle & "|||" & al)
       end tell
     end tell
   on error
