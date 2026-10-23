@@ -7,6 +7,9 @@ import subprocess
 import shutil
 import time
 import hashlib
+import re
+import urllib.request
+import urllib.parse
 
 CACHE_TRACK_FILE = "/tmp/nowplaying_track.txt"
 CACHE_ART_FILE = "/tmp/nowplaying_art_data.txt"
@@ -224,58 +227,100 @@ def download_and_encode_image(url, timeout=2.0):
     except Exception:
         return ""
 
+def clean_title_and_artist(artist, title):
+    t = (title or "").strip()
+    noise_patterns = [
+        r'\s*[\(\[][^\)\]]*(?:remaster|deluxe|edition|bonus|anniversary|official|video|audio|visualizer|hd|4k)[^\)\]]*[\)\]]',
+        r'\s*[\(\[](?:feat\.|ft\.).*?[\)\]]',
+        r'\s*-\s*single\s*$',
+        r'\s*-\s*ep\s*$',
+        r'\s*-\s*remaster(?:ed)?(?:\s*\d{4})?.*$',
+        r'\s*-\s*\d{4}\s*remaster.*$',
+    ]
+    cleaned_t = t
+    for pat in noise_patterns:
+        cleaned_t = re.sub(pat, '', cleaned_t, flags=re.I).strip()
+    if cleaned_t:
+        t = cleaned_t
+
+    a = re.sub(r'(\s*[-•]\s*Topic|\s*Topic\b)', '', artist or '', flags=re.I).strip()
+    primary_a = re.split(r'[,&•]|\s+(?:feat\.|ft\.|x|vs\.)\s+', a, flags=re.I)[0].strip()
+    return primary_a, a, t
+
 def fetch_online_artwork(artist, title):
     if not title:
         return ""
-    import urllib.request
-    import urllib.parse
-    import re
 
-    clean_artist = re.sub(r'(\s*[-•]\s*Topic|\s*Topic\b)', '', artist or '', flags=re.I).strip()
-    clean_title = re.sub(r'(\(Official.*?\)|\[Official.*?\]|\(Audio\)|\[Audio\])', '', title or '', flags=re.I).strip()
-    query = f"{clean_artist} {clean_title}".strip() or clean_title or title or ""
-    if not query:
-        return ""
+    primary_a, clean_a, clean_t = clean_title_and_artist(artist, title)
 
-    # Tier 1: iTunes Search API
+    queries = []
+    if primary_a and clean_t:
+        queries.append(f"{primary_a} {clean_t}".strip())
+    if clean_a and clean_t and clean_a != primary_a:
+        queries.append(f"{clean_a} {clean_t}".strip())
+    core_t = re.sub(r'\s*[\(\[].*?[\)\]]', '', clean_t).strip()
+    if core_t and core_t != clean_t:
+        if primary_a:
+            queries.append(f"{primary_a} {core_t}".strip())
+        queries.append(core_t)
+    if clean_t:
+        queries.append(clean_t.strip())
+    if artist and title:
+        raw_q = f"{artist} {title}".strip()
+        if raw_q not in queries:
+            queries.append(raw_q)
+
+    seen = set()
+    uniq_queries = []
+    for q in queries:
+        ql = q.lower()
+        if q and ql not in seen:
+            seen.add(ql)
+            uniq_queries.append(q)
+
+    # Tier 1: Deezer Search API (superb square 1000x1000 official album covers)
+    for q in uniq_queries:
+        try:
+            url = f"https://api.deezer.com/search?q={urllib.parse.quote(q)}&limit=1"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=1.8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                items = data.get("data", [])
+                if items:
+                    album = items[0].get("album", {})
+                    img_url = album.get("cover_xl") or album.get("cover_big")
+                    if img_url:
+                        b64_data = download_and_encode_image(img_url, timeout=1.8)
+                        if b64_data:
+                            return b64_data
+        except Exception:
+            pass
+
+    # Tier 2: iTunes Search API (high-res 600x600 square covers)
+    for q in uniq_queries:
+        try:
+            url = "https://itunes.apple.com/search?" + urllib.parse.urlencode({
+                "term": q,
+                "media": "music",
+                "limit": "1"
+            })
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=1.8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                results = data.get("results", [])
+                if results:
+                    raw_url = results[0].get("artworkUrl100", "")
+                    if raw_url:
+                        high_res = raw_url.replace("100x100bb", "600x600bb").replace("100x100", "600x600")
+                        b64_data = download_and_encode_image(high_res, timeout=1.8)
+                        if b64_data:
+                            return b64_data
+        except Exception:
+            pass
+
+    # Tier 3: YouTube Search fallback
     try:
-        url = "https://itunes.apple.com/search?" + urllib.parse.urlencode({
-            "term": query,
-            "media": "music",
-            "limit": "1"
-        })
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            results = data.get("results", [])
-            if results:
-                raw_url = results[0].get("artworkUrl100", "")
-                if raw_url:
-                    high_res = raw_url.replace("100x100bb", "600x600bb").replace("100x100", "600x600")
-                    b64_data = download_and_encode_image(high_res, timeout=1.5)
-                    if b64_data:
-                        return b64_data
-    except Exception:
-        pass
-
-    # Tier 2: Deezer Search API
-    try:
-        url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=1"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            items = data.get("data", [])
-            if items:
-                img_url = items[0].get("album", {}).get("cover_xl") or items[0].get("album", {}).get("cover_big")
-                b64_data = download_and_encode_image(img_url, timeout=1.5)
-                if b64_data:
-                    return b64_data
-    except Exception:
-        pass
-
-    # Tier 3: YouTube Search
-    try:
-        url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+        url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(uniq_queries[0] if uniq_queries else title)}"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
         with urllib.request.urlopen(req, timeout=2.0) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
@@ -290,8 +335,8 @@ def fetch_online_artwork(artist, title):
 
     return ""
 
-def process_artwork(data, track_key, artist="", title=""):
-    if not track_key:
+def process_artwork(data, track_key, artist="", title="", bundle_id="", app_name=""):
+    if not track_key and not title:
         return ""
 
     if not os.path.exists(CACHE_ART_DIR):
@@ -300,9 +345,62 @@ def process_artwork(data, track_key, artist="", title=""):
         except Exception:
             pass
 
-    track_cache_file = get_track_art_cache_path(track_key)
+    bundle_l = (bundle_id or (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") if data else "") or "").lower()
+    app_l = (app_name or "").lower()
+    is_yt = ("webapp" in bundle_l or "ytmusic" in bundle_l or "youtube" in app_l or "webkit" in bundle_l)
 
-    # 1. Fast path: return existing cached artwork for this track (only if valid data URL)
+    pa, ca, ct = clean_title_and_artist(artist, title)
+    canonical_key = f"{ct}___{ca}".lower() if ct else (track_key or "").lower()
+
+    official_cache_file = get_track_art_cache_path(f"official___{canonical_key}")
+    track_cache_file = get_track_art_cache_path(canonical_key)
+
+    # 1. Fast path: return verified official album art if already cached
+    if os.path.exists(official_cache_file):
+        try:
+            with open(official_cache_file, "r") as f:
+                cached_art = f.read().strip()
+                if cached_art and cached_art.startswith("data:image/"):
+                    return cached_art
+        except Exception:
+            pass
+
+    # 2. For YouTube Music: Prioritize official square song album art over video thumbnails
+    # (Matches user requirement: always use song album art for music videos on YouTube Music,
+    # and keeps artwork intact when switching between music video and audio modes)
+    if is_yt and title:
+        no_art_file = get_track_art_cache_path(f"no_art___{canonical_key}")
+        should_fetch = True
+        if os.path.exists(no_art_file):
+            try:
+                if (time.time() - os.path.getmtime(no_art_file)) < 300:
+                    should_fetch = False
+            except Exception:
+                pass
+
+        if should_fetch:
+            online_art = fetch_online_artwork(artist, title)
+            if online_art and online_art.startswith("data:image/"):
+                try:
+                    with open(official_cache_file, "w") as f:
+                        f.write(online_art)
+                    with open(track_cache_file, "w") as f:
+                        f.write(online_art)
+                    with open(CACHE_ART_FILE, "w") as f:
+                        f.write(online_art)
+                    with open(CACHE_YTMUSIC_ART_FILE, "w") as f:
+                        f.write(online_art)
+                except Exception:
+                    pass
+                return online_art
+            else:
+                try:
+                    with open(no_art_file, "w") as f:
+                        f.write("none")
+                except Exception:
+                    pass
+
+    # 3. Fast path: check standard track cache file (for non-YT or if online was not found)
     if track_cache_file and os.path.exists(track_cache_file):
         try:
             with open(track_cache_file, "r") as f:
@@ -312,7 +410,7 @@ def process_artwork(data, track_key, artist="", title=""):
         except Exception:
             pass
 
-    # 2. Process raw artwork from MediaRemote if present
+    # 4. Process raw artwork from MediaRemote if present (used directly for Apple Music, Spotify, or fallback)
     raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData") if data else None
     if raw_art and track_cache_file:
         try:
@@ -358,15 +456,14 @@ def process_artwork(data, track_key, artist="", title=""):
                     f.write(artwork_data_url)
                 with open(CACHE_ART_FILE, "w") as f:
                     f.write(artwork_data_url)
-                b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower() if data else ""
-                if "webapp" in b_id or "safari" in b_id or "webkit" in b_id:
+                if is_yt:
                     with open(CACHE_YTMUSIC_ART_FILE, "w") as f:
                         f.write(artwork_data_url)
                 return artwork_data_url
         except Exception:
             pass
 
-    # 3. Robust online resolution (iTunes -> Deezer -> YouTube)
+    # 5. Non-YT online resolution fallback
     if title:
         online_art = fetch_online_artwork(artist, title)
         if online_art and online_art.startswith("data:image/"):
@@ -675,7 +772,7 @@ end tell
 
             # Resolve artwork
             yt_art_key = f"{title}___{artist}___"
-            artwork_url = process_artwork({}, yt_art_key, artist, title)
+            artwork_url = process_artwork({}, yt_art_key, artist, title, "com.apple.Safari.WebApp.F5D92F4A-8F5E-4368-A535-047D3666F565", "YouTube Music")
 
             return {
                 "id": "ytmusic",
@@ -736,15 +833,7 @@ end tell
             art_url = ""
             if name:
                 am_art_key = f"{name}___{artist}___{album}"
-                am_cache_file = get_track_art_cache_path(am_art_key)
-                if am_cache_file and os.path.exists(am_cache_file):
-                    try:
-                        with open(am_cache_file, "r") as f:
-                            art_url = f.read().strip()
-                    except Exception:
-                        pass
-                if not art_url:
-                    art_url = fetch_itunes_artwork(artist, name)
+                art_url = process_artwork({}, am_art_key, artist, name, "com.apple.Music", "Apple Music")
 
             return {
                 "id": "apple_music",
@@ -953,14 +1042,15 @@ def main():
 
             art_track_key = f"{title}___{artist}___{album}"
             progress_track_key = f"{uid}___{title}___{artist}___{round(duration, 1)}"
-            artwork_url = process_artwork(mr_data, art_track_key, artist, title)
+            artwork_url = process_artwork(mr_data, art_track_key, artist, title, bundle_id, app_name)
             current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
 
             # Rating determination
             rating = None
             if supports_rating:
                 if stream_id == "ytmusic":
-                    rating = get_ytmusic_rating()
+                    # Rating is fetched in get_ytmusic_direct_stream to avoid redundant JXA calls
+                    rating = None
                 elif stream_id == "apple_music":
                     am_s = get_apple_music_stream()
                     if am_s:
@@ -991,8 +1081,10 @@ def main():
         if yt_stream:
             if "ytmusic" in streams_map:
                 existing = streams_map["ytmusic"]
-                if existing.get("artwork"):
+                if not yt_stream.get("artwork") and existing.get("artwork"):
                     yt_stream["artwork"] = existing["artwork"]
+                elif yt_stream.get("artwork") and not existing.get("artwork"):
+                    existing["artwork"] = yt_stream["artwork"]
                 if existing.get("album"):
                     yt_stream["album"] = existing["album"]
                 if existing.get("bundleId"):
@@ -1005,6 +1097,8 @@ def main():
                     primary_stream["duration"] = yt_stream["duration"]
                     primary_stream["rate"] = yt_stream["rate"]
                     primary_stream["rating"] = yt_stream["rating"]
+                    if yt_stream.get("artwork"):
+                        primary_stream["artwork"] = yt_stream["artwork"]
                     if yt_stream.get("title"):
                         primary_stream["title"] = yt_stream["title"]
                     if yt_stream.get("artist"):
@@ -1031,14 +1125,18 @@ def main():
         if am_stream:
             if "apple_music" in streams_map:
                 existing = streams_map["apple_music"]
-                if existing.get("artwork"):
+                if not am_stream.get("artwork") and existing.get("artwork"):
                     am_stream["artwork"] = existing["artwork"]
+                elif am_stream.get("artwork") and not existing.get("artwork"):
+                    existing["artwork"] = am_stream["artwork"]
                 streams_map["apple_music"] = am_stream
                 if primary_stream and primary_stream.get("id") == "apple_music":
                     primary_stream["elapsed"] = am_stream["elapsed"]
                     primary_stream["duration"] = am_stream["duration"]
                     primary_stream["rate"] = am_stream["rate"]
                     primary_stream["rating"] = am_stream["rating"]
+                    if am_stream.get("artwork"):
+                        primary_stream["artwork"] = am_stream["artwork"]
             else:
                 streams_map["apple_music"] = am_stream
 
@@ -1048,13 +1146,17 @@ def main():
         if sp_stream:
             if "spotify" in streams_map:
                 existing = streams_map["spotify"]
-                if existing.get("artwork"):
+                if not sp_stream.get("artwork") and existing.get("artwork"):
                     sp_stream["artwork"] = existing["artwork"]
+                elif sp_stream.get("artwork") and not existing.get("artwork"):
+                    existing["artwork"] = sp_stream["artwork"]
                 streams_map["spotify"] = sp_stream
                 if primary_stream and primary_stream.get("id") == "spotify":
                     primary_stream["elapsed"] = sp_stream["elapsed"]
                     primary_stream["duration"] = sp_stream["duration"]
                     primary_stream["rate"] = sp_stream["rate"]
+                    if sp_stream.get("artwork"):
+                        primary_stream["artwork"] = sp_stream["artwork"]
             else:
                 streams_map["spotify"] = sp_stream
 
