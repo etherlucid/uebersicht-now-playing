@@ -10,6 +10,7 @@ struct StreamInfo: Codable {
 }
 
 struct MenuState: Codable {
+    var mode: String?
     var instanceId: String?
     var sizePreset: String?
     var enableSnapping: Bool?
@@ -19,6 +20,7 @@ struct MenuState: Codable {
     var artist: String?
     var appName: String?
     var streams: [StreamInfo]?
+    var screenId: String?
     var x: Int?
     var y: Int?
 }
@@ -37,6 +39,30 @@ if CommandLine.arguments.count > 1 {
     if let data = jsonStr.data(using: .utf8) {
         state = (try? JSONDecoder().decode(MenuState.self, from: data)) ?? MenuState()
     }
+}
+
+if CommandLine.arguments.contains("--screens") || state.mode == "GET_SCREENS" {
+    let screens = NSScreen.screens
+    var screenInfos: [[String: Any]] = []
+    for (i, s) in screens.enumerated() {
+        let desc = s.deviceDescription
+        let screenNumber = desc[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
+        screenInfos.append([
+            "index": i,
+            "id": screenNumber,
+            "name": s.localizedName,
+            "isMain": s == NSScreen.main,
+            "x": Int(s.frame.origin.x),
+            "y": Int(s.frame.origin.y),
+            "w": Int(s.frame.size.width),
+            "h": Int(s.frame.size.height)
+        ])
+    }
+    if let data = try? JSONSerialization.data(withJSONObject: screenInfos),
+       let json = String(data: data, encoding: .utf8) {
+        print(json)
+    }
+    exit(0)
 }
 
 let instanceId = state.instanceId ?? "default"
@@ -142,11 +168,27 @@ resetItem.target = delegate
 resetItem.representedObject = "{\"action\":\"RESET_POSITION\",\"instanceId\":\"\(instanceId)\"}"
 menu.addItem(resetItem)
 
-// Snap Widgets to External Display
-let snapDisplayItem = NSMenuItem(title: "🖥️ Snap Widgets to External Display", action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
-snapDisplayItem.target = delegate
-snapDisplayItem.representedObject = "{\"action\":\"SNAP_TO_EXTERNAL_DISPLAY\"}"
-menu.addItem(snapDisplayItem)
+// Display Submenu
+let screens = NSScreen.screens
+if screens.count > 1 {
+    let dispParent = NSMenuItem(title: "Display", action: nil, keyEquivalent: "")
+    let dispMenu = NSMenu(title: "Display")
+    dispMenu.autoenablesItems = false
+    let currentScreen = state.screenId ?? "screen_1"
+    for (i, s) in screens.enumerated() {
+        let sid = "screen_\(i)"
+        let label = s.localizedName.isEmpty ? "Display \(i + 1)" : s.localizedName
+        let item = NSMenuItem(title: label, action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
+        item.target = delegate
+        item.representedObject = "{\"action\":\"MOVE_TO_SCREEN\",\"screenId\":\"\(sid)\",\"instanceId\":\"\(instanceId)\"}"
+        if currentScreen == sid {
+            item.state = .on
+        }
+        dispMenu.addItem(item)
+    }
+    dispParent.submenu = dispMenu
+    menu.addItem(dispParent)
+}
 
 // Reload Widget
 let reloadItem = NSMenuItem(title: "Reload Widget", action: #selector(MenuDelegate.handleItem(_:)), keyEquivalent: "")
