@@ -11,21 +11,18 @@ import re
 import urllib.request
 import urllib.parse
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WIDGET_CACHE_DIR = os.path.join(SCRIPT_DIR, ".cache")
-
 CACHE_TRACK_FILE = "/tmp/nowplaying_track.txt"
 CACHE_ART_FILE = "/tmp/nowplaying_art_data.txt"
 CACHE_STATE_FILE = "/tmp/nowplaying_state.json"
-CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache_v3.json"
+CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache_v5.json"
 CACHE_RATINGS_FILE = "/tmp/nowplaying_ratings.json"
-CACHE_ART_META_DIR = "/tmp/nowplaying_art_meta_v3"
-CACHE_YTMUSIC_ART_FILE = "/tmp/nowplaying_ytmusic_art.txt"
-CACHE_APP_ICON_DIR = "/tmp/nowplaying_app_icons_v3"
-CACHE_APP_ICON_SCRIPT = "/tmp/nowplaying_get_app_icon_v3.js"
-CACHE_BG_PLAYERS_FILE = "/tmp/nowplaying_bg_players.json"
-CACHE_BG_PLAYERS_LOCK = "/tmp/nowplaying_bg_players.lock"
-CACHE_FETCH_LOCK_DIR = "/tmp/nowplaying_fetch_locks"
+CACHE_ART_DIR = "/tmp/nowplaying_art_cache_v5"
+CACHE_YTMUSIC_ART_FILE = "/tmp/nowplaying_ytmusic_art_v5.txt"
+CACHE_APP_ICON_DIR = "/tmp/nowplaying_app_icons_v5"
+CACHE_APP_ICON_SCRIPT = "/tmp/nowplaying_get_app_icon_v5.js"
+CACHE_BG_PLAYERS_FILE = "/tmp/nowplaying_bg_players_v5.json"
+CACHE_BG_PLAYERS_LOCK = "/tmp/nowplaying_bg_players_v5.lock"
+CACHE_FETCH_LOCK_DIR = "/tmp/nowplaying_fetch_locks_v5"
 
 _APP_ICON_MEM_CACHE = {}
 
@@ -34,7 +31,6 @@ JXA_APP_ICON_SCRIPT_CODE = '''ObjC.import("AppKit");
 function run(argv) {
     var bundleId = argv[0] || "";
     var appName = argv[1] || "";
-    var outPath = argv[2] || "";
 
     var ws = $.NSWorkspace.sharedWorkspace;
     var fm = $.NSFileManager.defaultManager;
@@ -111,39 +107,20 @@ function run(argv) {
 
     var pngData = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}));
     if (!pngData) return "NONE";
-    if (outPath) {
-        pngData.writeToFileAtomically(outPath, true);
-        return "SAVED";
-    }
     var b64 = pngData.base64EncodedStringWithOptions(0);
     return "data:image/png;base64," + ObjC.unwrap(b64);
 }
 '''
 
+
 def ensure_dirs():
-    for d in (WIDGET_CACHE_DIR, CACHE_ART_META_DIR, CACHE_APP_ICON_DIR, CACHE_FETCH_LOCK_DIR):
+    for d in (CACHE_ART_DIR, CACHE_APP_ICON_DIR, CACHE_FETCH_LOCK_DIR):
         if not os.path.exists(d):
             try:
                 os.makedirs(d, exist_ok=True)
             except Exception:
                 pass
 
-def save_art_bytes_to_widget_cache(img_bytes, key_hash, ext="jpg"):
-    if not img_bytes:
-        return ""
-    ensure_dirs()
-    filename = f"art_{key_hash}.{ext}"
-    abs_path = os.path.join(WIDGET_CACHE_DIR, filename)
-    rel_url = f"nowplaying.widget/.cache/{filename}"
-    try:
-        if not os.path.exists(abs_path) or os.path.getsize(abs_path) != len(img_bytes):
-            tmp_path = f"{abs_path}.tmp.{os.getpid()}"
-            with open(tmp_path, "wb") as f:
-                f.write(img_bytes)
-            os.replace(tmp_path, abs_path)
-        return rel_url
-    except Exception:
-        return ""
 
 def get_app_icon(bundle_id, app_name):
     bundle_id = (bundle_id or "").strip()
@@ -159,27 +136,19 @@ def get_app_icon(bundle_id, app_name):
 
     ensure_dirs()
     key_hash = hashlib.md5(cache_key.encode("utf-8", errors="ignore")).hexdigest()
-    meta_file = os.path.join(CACHE_APP_ICON_DIR, f"{key_hash}.txt")
-    icon_filename = f"icon_{key_hash}.png"
-    icon_abs_path = os.path.join(WIDGET_CACHE_DIR, icon_filename)
-    icon_rel_url = f"nowplaying.widget/.cache/{icon_filename}"
+    cache_file = os.path.join(CACHE_APP_ICON_DIR, f"{key_hash}.txt")
 
-    if os.path.exists(icon_abs_path) and os.path.getsize(icon_abs_path) > 0:
-        _APP_ICON_MEM_CACHE[cache_key] = icon_rel_url
-        return icon_rel_url
-
-    if os.path.exists(meta_file):
+    if os.path.exists(cache_file):
         try:
-            # Negative cache ("NONE") expires after 1 hour
-            if (time.time() - os.path.getmtime(meta_file)) < 3600:
-                with open(meta_file, "r") as f:
-                    val = f.read().strip()
-                if val == "NONE":
+            with open(cache_file, "r") as f:
+                val = f.read().strip()
+            if val == "NONE":
+                if (time.time() - os.path.getmtime(cache_file)) < 3600:
                     _APP_ICON_MEM_CACHE[cache_key] = ""
                     return ""
-                elif val and os.path.exists(os.path.join(SCRIPT_DIR, "..", val)):
-                    _APP_ICON_MEM_CACHE[cache_key] = val
-                    return val
+            elif val.startswith("data:image/"):
+                _APP_ICON_MEM_CACHE[cache_key] = val
+                return val
         except Exception:
             pass
 
@@ -192,30 +161,31 @@ def get_app_icon(bundle_id, app_name):
 
     try:
         proc = subprocess.run(
-            ["osascript", "-l", "JavaScript", CACHE_APP_ICON_SCRIPT, bundle_id, app_name, icon_abs_path],
+            ["osascript", "-l", "JavaScript", CACHE_APP_ICON_SCRIPT, bundle_id, app_name],
             capture_output=True,
             text=True,
             timeout=1.2
         )
         out = proc.stdout.strip()
-        if out == "SAVED" and os.path.exists(icon_abs_path):
+        if out.startswith("data:image/png;base64,"):
             try:
-                with open(meta_file, "w") as f:
-                    f.write(icon_rel_url)
+                with open(cache_file, "w") as f:
+                    f.write(out)
             except Exception:
                 pass
-            _APP_ICON_MEM_CACHE[cache_key] = icon_rel_url
-            return icon_rel_url
+            _APP_ICON_MEM_CACHE[cache_key] = out
+            return out
     except Exception:
         pass
 
     try:
-        with open(meta_file, "w") as f:
+        with open(cache_file, "w") as f:
             f.write("NONE")
     except Exception:
         pass
     _APP_ICON_MEM_CACHE[cache_key] = ""
     return ""
+
 
 def find_nowplaying_cli():
     for p in ("/opt/homebrew/bin/nowplaying-cli", "/usr/local/bin/nowplaying-cli"):
@@ -223,6 +193,7 @@ def find_nowplaying_cli():
             return p
     which_p = shutil.which("nowplaying-cli")
     return which_p or "/opt/homebrew/bin/nowplaying-cli"
+
 
 def get_nowplaying_data():
     cli = find_nowplaying_cli()
@@ -242,145 +213,176 @@ def get_nowplaying_data():
     except Exception:
         return None
 
-def get_meta_cache_path(key):
-    if not key:
-        return ""
-    h = hashlib.md5(key.encode("utf-8", errors="ignore")).hexdigest()
-    return os.path.join(CACHE_ART_META_DIR, f"{h}.txt")
 
-def download_image_bytes(url, timeout=2.0):
+def detect_mime(data_bytes):
+    if not data_bytes:
+        return None
+    if data_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data_bytes.startswith(b"\x89PNG"):
+        return "image/png"
+    if data_bytes.startswith(b"GIF8"):
+        return "image/gif"
+    if data_bytes.startswith(b"RIFF") and b"WEBP" in data_bytes[:16]:
+        return "image/webp"
+    return None
+
+
+def bytes_to_data_url(art_bytes):
+    if not art_bytes:
+        return ""
+    mime = detect_mime(art_bytes)
+    if mime and len(art_bytes) <= 300000:
+        b64 = base64.b64encode(art_bytes).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+
+    # Convert TIFF or oversized image to compact high-quality JPEG via sips
+    pid = os.getpid()
+    tmp_in = f"/tmp/np_art_in_{pid}.img"
+    tmp_out = f"/tmp/np_art_out_{pid}.jpg"
+    try:
+        with open(tmp_in, "wb") as f:
+            f.write(art_bytes)
+        subprocess.run(
+            ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "85", "-Z", "600", tmp_in, "--out", tmp_out],
+            capture_output=True,
+            timeout=1.0
+        )
+        if os.path.exists(tmp_out):
+            with open(tmp_out, "rb") as f:
+                jpg_bytes = f.read()
+            if jpg_bytes:
+                b64 = base64.b64encode(jpg_bytes).decode("ascii")
+                return f"data:image/jpeg;base64,{b64}"
+    except Exception:
+        pass
+    finally:
+        for p in (tmp_in, tmp_out):
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+
+    if mime:
+        b64 = base64.b64encode(art_bytes).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    return ""
+
+
+def download_and_encode_image(url, timeout=2.0):
     if not url:
-        return None, "jpg"
+        return ""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read()
             if not data:
-                return None, "jpg"
-            ext = "jpg"
-            if data.startswith(b"\x89PNG"):
-                ext = "png"
-            elif data.startswith(b"GIF"):
-                ext = "gif"
-            elif data.startswith(b"RIFF") and b"WEBP" in data[:16]:
-                ext = "webp"
-            return data, ext
+                return ""
+            return bytes_to_data_url(data)
     except Exception:
-        return None, "jpg"
+        return ""
 
-def clean_title_and_artist(artist, title):
-    t = (title or "").strip()
-    noise_patterns = [
-        r'\s*[\(\[][^\)\]]*(?:remaster|deluxe|edition|bonus|anniversary|official|video|audio|visualizer|hd|4k)[^\)\]]*[\)\]]',
-        r'\s*[\(\[](?:feat\.|ft\.).*?[\)\]]',
-        r'\s*-\s*single\s*$',
-        r'\s*-\s*ep\s*$',
-        r'\s*-\s*remaster(?:ed)?(?:\s*\d{4})?.*$',
-        r'\s*-\s*\d{4}\s*remaster.*$',
-    ]
-    cleaned_t = t
-    for pat in noise_patterns:
-        cleaned_t = re.sub(pat, '', cleaned_t, flags=re.I).strip()
-    if cleaned_t:
-        t = cleaned_t
 
-    a = re.sub(r'(\s*[-•]\s*Topic|\s*Topic\b)', '', artist or '', flags=re.I).strip()
-    primary_a = re.split(r'[,&•]|\s+(?:feat\.|ft\.|x|vs\.)\s+', a, flags=re.I)[0].strip()
-    return primary_a, a, t
-
-def fetch_online_artwork_bytes(artist, title):
+def fetch_online_artwork(artist, title):
     if not title:
-        return None, "jpg"
+        return ""
 
-    primary_a, clean_a, clean_t = clean_title_and_artist(artist, title)
+    clean_artist = re.sub(r'(\s*[-•]\s*Topic|\s*Topic\b)', '', artist or '', flags=re.I).strip()
+    clean_title = re.sub(r'(\(Official.*?\)|\[Official.*?\]|\(Audio\)|\[Audio\])', '', title or '', flags=re.I).strip()
+    query = f"{clean_artist} {clean_title}".strip() or clean_title or title or ""
+    if not query:
+        return ""
 
-    queries = []
-    if primary_a and clean_t:
-        queries.append(f"{primary_a} {clean_t}".strip())
-    if clean_a and clean_t and clean_a != primary_a:
-        queries.append(f"{clean_a} {clean_t}".strip())
-    core_t = re.sub(r'\s*[\(\[].*?[\)\]]', '', clean_t).strip()
-    if core_t and core_t != clean_t:
-        if primary_a:
-            queries.append(f"{primary_a} {core_t}".strip())
-        queries.append(core_t)
-    if clean_t:
-        queries.append(clean_t.strip())
-    if artist and title:
-        raw_q = f"{artist} {title}".strip()
-        if raw_q not in queries:
-            queries.append(raw_q)
+    # Tier 1: iTunes Search API
+    try:
+        url = "https://itunes.apple.com/search?" + urllib.parse.urlencode({
+            "term": query,
+            "media": "music",
+            "limit": "1"
+        })
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = data.get("results", [])
+            if results:
+                raw_url = results[0].get("artworkUrl100", "")
+                if raw_url:
+                    high_res = raw_url.replace("100x100bb", "600x600bb").replace("100x100", "600x600")
+                    b64_data = download_and_encode_image(high_res, timeout=1.5)
+                    if b64_data:
+                        return b64_data
+    except Exception:
+        pass
 
-    seen = set()
-    uniq_queries = []
-    for q in queries:
-        ql = q.lower()
-        if q and ql not in seen:
-            seen.add(ql)
-            uniq_queries.append(q)
+    # Tier 2: Deezer Search API
+    try:
+        url = f"https://api.deezer.com/search?q={urllib.parse.quote(query)}&limit=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            items = data.get("data", [])
+            if items:
+                img_url = items[0].get("album", {}).get("cover_xl") or items[0].get("album", {}).get("cover_big")
+                b64_data = download_and_encode_image(img_url, timeout=1.5)
+                if b64_data:
+                    return b64_data
+    except Exception:
+        pass
 
-    # Tier 1: Deezer Search API (square 1000x1000 official album covers)
-    for q in uniq_queries[:3]:
-        try:
-            url = f"https://api.deezer.com/search?q={urllib.parse.quote(q)}&limit=1"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                items = data.get("data", [])
-                if items:
-                    album = items[0].get("album", {})
-                    img_url = album.get("cover_xl") or album.get("cover_big")
-                    if img_url:
-                        img_bytes, ext = download_image_bytes(img_url, timeout=2.0)
-                        if img_bytes:
-                            return img_bytes, ext
-        except Exception:
-            pass
+    # Tier 3: YouTube Search
+    try:
+        url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            vids = re.findall(r'\"videoId\":\"([a-zA-Z0-9_-]{11})\"', html)
+            if vids:
+                thumb_url = f"https://i.ytimg.com/vi/{vids[0]}/hqdefault.jpg"
+                b64_data = download_and_encode_image(thumb_url, timeout=2.0)
+                if b64_data:
+                    return b64_data
+    except Exception:
+        pass
 
-    # Tier 2: iTunes Search API (600x600 square covers)
-    for q in uniq_queries[:3]:
-        try:
-            url = "https://itunes.apple.com/search?" + urllib.parse.urlencode({
-                "term": q,
-                "media": "music",
-                "limit": "1"
-            })
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                results = data.get("results", [])
-                if results:
-                    raw_url = results[0].get("artworkUrl100", "")
-                    if raw_url:
-                        high_res = raw_url.replace("100x100bb", "600x600bb").replace("100x100", "600x600")
-                        img_bytes, ext = download_image_bytes(high_res, timeout=2.0)
-                        if img_bytes:
-                            return img_bytes, ext
-        except Exception:
-            pass
+    return ""
 
-    # Tier 3: YouTube Search fallback (only if artist is known or YT Music)
-    if primary_a:
-        try:
-            url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(uniq_queries[0] if uniq_queries else title)}"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
-                vids = re.findall(r'\"videoId\":\"([a-zA-Z0-9_-]{11})\"', html)
-                if vids:
-                    thumb_url = f"https://i.ytimg.com/vi/{vids[0]}/hqdefault.jpg"
-                    img_bytes, ext = download_image_bytes(thumb_url, timeout=2.0)
-                    if img_bytes:
-                        return img_bytes, ext
-        except Exception:
-            pass
 
-    return None, "jpg"
+def get_canonical_track_hash(artist, title, track_key=""):
+    t = (title or "").strip().lower()
+    a = (artist or "").strip().lower()
+    base = f"{t}___{a}" if t else (track_key or "").strip().lower()
+    return hashlib.md5(base.encode("utf-8", errors="ignore")).hexdigest()
 
-def spawn_background_art_fetch(artist, title, canonical_key):
+
+def read_cached_data_url(path):
+    if not path or not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "r") as f:
+            val = f.read().strip()
+        if val.startswith("data:image/") or val.startswith("http://") or val.startswith("https://"):
+            return val
+    except Exception:
+        pass
+    return ""
+
+
+def write_cached_data_url(path, val):
+    if not path or not val:
+        return
+    try:
+        tmp = f"{path}.tmp.{os.getpid()}"
+        with open(tmp, "w") as f:
+            f.write(val)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def spawn_background_art_fetch(artist, title, track_hash):
     ensure_dirs()
-    key_hash = hashlib.md5(canonical_key.encode("utf-8", errors="ignore")).hexdigest()
-    lock_file = os.path.join(CACHE_FETCH_LOCK_DIR, f"{key_hash}.lock")
+    lock_file = os.path.join(CACHE_FETCH_LOCK_DIR, f"{track_hash}.lock")
     if os.path.exists(lock_file):
         try:
             if (time.time() - os.path.getmtime(lock_file)) < 15:
@@ -391,7 +393,7 @@ def spawn_background_art_fetch(artist, title, canonical_key):
         with open(lock_file, "w") as f:
             f.write(str(os.getpid()))
         subprocess.Popen(
-            [sys.executable, os.path.abspath(__file__), "--fetch-art", artist or "", title or "", canonical_key],
+            [sys.executable, os.path.abspath(__file__), "--fetch-art", artist or "", title or "", track_hash],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -401,23 +403,21 @@ def spawn_background_art_fetch(artist, title, canonical_key):
     except Exception:
         pass
 
-def run_fetch_art_worker(artist, title, canonical_key):
+
+def run_fetch_art_worker(artist, title, track_hash):
     ensure_dirs()
-    key_hash = hashlib.md5(canonical_key.encode("utf-8", errors="ignore")).hexdigest()
-    lock_file = os.path.join(CACHE_FETCH_LOCK_DIR, f"{key_hash}.lock")
-    official_meta = get_meta_cache_path(f"official___{canonical_key}")
-    track_meta = get_meta_cache_path(canonical_key)
-    no_art_file = get_meta_cache_path(f"no_art___{canonical_key}")
+    lock_file = os.path.join(CACHE_FETCH_LOCK_DIR, f"{track_hash}.lock")
+    direct_file = os.path.join(CACHE_ART_DIR, f"direct_{track_hash}.txt")
+    fallback_file = os.path.join(CACHE_ART_DIR, f"fallback_{track_hash}.txt")
+    no_art_file = os.path.join(CACHE_ART_DIR, f"no_art_{track_hash}.txt")
 
     try:
-        img_bytes, ext = fetch_online_artwork_bytes(artist, title)
-        if img_bytes:
-            rel_url = save_art_bytes_to_widget_cache(img_bytes, f"off_{key_hash}", ext)
-            if rel_url:
-                with open(official_meta, "w") as f:
-                    f.write(rel_url)
-                with open(track_meta, "w") as f:
-                    f.write(rel_url)
+        # Never fetch online artwork if direct media player artwork already exists
+        if read_cached_data_url(direct_file):
+            return
+        online_art = fetch_online_artwork(artist, title)
+        if online_art:
+            write_cached_data_url(fallback_file, online_art)
         else:
             with open(no_art_file, "w") as f:
                 f.write("none")
@@ -430,107 +430,69 @@ def run_fetch_art_worker(artist, title, canonical_key):
         except Exception:
             pass
 
-def read_cached_art_url(meta_path):
-    if not meta_path or not os.path.exists(meta_path):
-        return ""
-    try:
-        with open(meta_path, "r") as f:
-            rel_url = f.read().strip()
-        if rel_url and rel_url.startswith("nowplaying.widget/.cache/"):
-            fname = os.path.basename(rel_url)
-            if os.path.exists(os.path.join(WIDGET_CACHE_DIR, fname)):
-                return rel_url
-    except Exception:
-        pass
-    return ""
 
-def process_artwork(data, track_key, artist="", title="", bundle_id="", app_name=""):
+def process_artwork(data, track_key, artist="", title=""):
     if not track_key and not title:
         return ""
 
     ensure_dirs()
-    bundle_l = (bundle_id or (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") if data else "") or "").lower()
-    app_l = (app_name or "").lower()
-    is_yt = ("webapp" in bundle_l or "ytmusic" in bundle_l or "youtube" in app_l or "webkit" in bundle_l)
-    is_music_app = is_yt or any(k in bundle_l or k in app_l for k in ("music", "spotify", "itunes", "tidal", "deezer", "soundcloud"))
+    track_hash = get_canonical_track_hash(artist, title, track_key)
+    direct_file = os.path.join(CACHE_ART_DIR, f"direct_{track_hash}.txt")
+    fallback_file = os.path.join(CACHE_ART_DIR, f"fallback_{track_hash}.txt")
+    no_art_file = os.path.join(CACHE_ART_DIR, f"no_art_{track_hash}.txt")
 
-    pa, ca, ct = clean_title_and_artist(artist, title)
-    canonical_key = f"{ct}___{ca}".lower() if ct else (track_key or "").lower()
-    key_hash = hashlib.md5(canonical_key.encode("utf-8", errors="ignore")).hexdigest()
-
-    official_meta = get_meta_cache_path(f"official___{canonical_key}")
-    track_meta = get_meta_cache_path(canonical_key)
-    no_art_file = get_meta_cache_path(f"no_art___{canonical_key}")
-
-    # 1. Fast path: verified official square album art already on disk
-    cached_official = read_cached_art_url(official_meta)
-    if cached_official:
-        return cached_official
-
-    # 2. Check if negative cache is fresh (5 minutes)
-    can_try_online = True
-    if os.path.exists(no_art_file):
-        try:
-            if (time.time() - os.path.getmtime(no_art_file)) < 300:
-                can_try_online = False
-        except Exception:
-            pass
-
-    # For YouTube Music, trigger non-blocking background fetch for square official album art
-    if is_yt and title and can_try_online:
-        spawn_background_art_fetch(artist, title, canonical_key)
-
-    # 3. Fast path: check standard track cache file (MediaRemote decoded image or prior art)
-    cached_track = read_cached_art_url(track_meta)
-    if cached_track:
-        return cached_track
-
-    # 4. Decode raw artwork from MediaRemote if present (instant local decode, <15ms)
+    # 1. HIGHEST PRIORITY: Direct artwork from the media player (MediaRemote kMRMediaRemoteNowPlayingInfoArtworkData)
     raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData") if data else None
-    if raw_art:
-        try:
-            art_bytes = base64.b64decode(raw_art)
-            if art_bytes:
-                ext = "jpg"
-                if art_bytes.startswith(b"\x89PNG"):
-                    ext = "png"
-                elif art_bytes.startswith(b"RIFF") and b"WEBP" in art_bytes[:16]:
-                    ext = "webp"
-                elif art_bytes.startswith(b"II*\x00") or art_bytes.startswith(b"MM\x00*"):
-                    # Convert TIFF to JPEG via sips
-                    tmp_in = f"/tmp/np_art_{os.getpid()}.tiff"
-                    tmp_out = f"/tmp/np_art_{os.getpid()}.jpg"
-                    with open(tmp_in, "wb") as f:
-                        f.write(art_bytes)
-                    subprocess.run(
-                        ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "85", "-Z", "600", tmp_in, "--out", tmp_out],
-                        capture_output=True,
-                        timeout=0.8
-                    )
-                    if os.path.exists(tmp_out):
-                        with open(tmp_out, "rb") as f:
-                            art_bytes = f.read()
-                        try:
-                            os.remove(tmp_in)
-                            os.remove(tmp_out)
-                        except Exception:
-                            pass
-                rel_url = save_art_bytes_to_widget_cache(art_bytes, key_hash, ext)
-                if rel_url:
-                    try:
-                        with open(track_meta, "w") as f:
-                            f.write(rel_url)
-                    except Exception:
-                        pass
-                    return rel_url
-        except Exception:
-            pass
+    if raw_art and isinstance(raw_art, str):
+        raw_clean = "".join(raw_art.split())
+        if raw_clean:
+            raw_sig = f"{raw_clean[:512]}_{len(raw_clean)}_{ raw_clean[-256:] if len(raw_clean) > 256 else '' }"
+            raw_hash = hashlib.md5(raw_sig.encode("ascii", errors="ignore")).hexdigest()
+            raw_cache_file = os.path.join(CACHE_ART_DIR, f"raw_{raw_hash}.txt")
 
-    # 5. Non-YT online resolution fallback (only for music apps or streams with an artist, in background)
-    if title and can_try_online and (is_music_app or bool(artist)):
-        spawn_background_art_fetch(artist, title, canonical_key)
+            cached_raw = read_cached_data_url(raw_cache_file)
+            if cached_raw:
+                if not os.path.exists(direct_file):
+                    write_cached_data_url(direct_file, cached_raw)
+                return cached_raw
+
+            try:
+                art_bytes = base64.b64decode(raw_clean)
+                data_url = bytes_to_data_url(art_bytes)
+                if data_url:
+                    write_cached_data_url(raw_cache_file, data_url)
+                    write_cached_data_url(direct_file, data_url)
+                    b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower() if data else ""
+                    if "webapp" in b_id or "safari" in b_id or "webkit" in b_id:
+                        write_cached_data_url(CACHE_YTMUSIC_ART_FILE, data_url)
+                    return data_url
+            except Exception:
+                pass
+
+    # 2. Cached direct artwork previously provided by the media player for this track
+    cached_direct = read_cached_data_url(direct_file)
+    if cached_direct:
+        return cached_direct
+
+    # 3. Cached fallback online artwork (only used when media player provided no artwork)
+    cached_fallback = read_cached_data_url(fallback_file)
+    if cached_fallback:
+        return cached_fallback
+
+    # 4. Trigger non-blocking online fallback ONLY if media player provided no artwork
+    if title:
+        can_try_online = True
+        if os.path.exists(no_art_file):
+            try:
+                if (time.time() - os.path.getmtime(no_art_file)) < 300:
+                    can_try_online = False
+            except Exception:
+                pass
+        if can_try_online:
+            spawn_background_art_fetch(artist, title, track_hash)
 
     return ""
+
 
 def is_process_running(proc_name):
     try:
@@ -538,6 +500,7 @@ def is_process_running(proc_name):
         return res.returncode == 0
     except Exception:
         return False
+
 
 def get_app_name(bundle_id):
     if not bundle_id:
@@ -564,6 +527,7 @@ def get_app_name(bundle_id):
     if "vlc" in b:
         return "VLC"
     return "macOS Audio"
+
 
 def calculate_progress(track_key, raw_elapsed, duration, playback_rate):
     now = time.time()
@@ -662,6 +626,7 @@ def calculate_progress(track_key, raw_elapsed, duration, playback_rate):
         pass
 
     return current_elapsed
+
 
 def get_ytmusic_direct_stream():
     if not is_process_running("Web App"):
@@ -779,7 +744,7 @@ end tell
             rating = "liked" if lk_val == "1" else ("disliked" if dlk_val == "1" else None)
 
             yt_art_key = f"{title}___{artist}___"
-            artwork_url = process_artwork({}, yt_art_key, artist, title, "com.apple.Safari.WebApp.F5D92F4A-8F5E-4368-A535-047D3666F565", "YouTube Music")
+            artwork_url = process_artwork({}, yt_art_key, artist, title)
 
             return {
                 "id": "ytmusic",
@@ -799,6 +764,7 @@ end tell
     except Exception:
         pass
     return None
+
 
 def get_apple_music_stream():
     if not is_process_running("Music"):
@@ -840,7 +806,7 @@ end tell
             art_url = ""
             if name:
                 am_art_key = f"{name}___{artist}___{album}"
-                art_url = process_artwork({}, am_art_key, artist, name, "com.apple.Music", "Apple Music")
+                art_url = process_artwork({}, am_art_key, artist, name)
 
             return {
                 "id": "apple_music",
@@ -860,6 +826,7 @@ end tell
     except Exception:
         pass
     return None
+
 
 def get_spotify_stream():
     if not is_process_running("Spotify"):
@@ -914,6 +881,7 @@ end tell
         pass
     return None
 
+
 def run_poll_players_worker():
     try:
         result = {"ts": time.time(), "players": {}}
@@ -941,6 +909,7 @@ def run_poll_players_worker():
                 os.remove(CACHE_BG_PLAYERS_LOCK)
         except Exception:
             pass
+
 
 def get_cached_bg_players():
     now = time.time()
@@ -983,6 +952,7 @@ def get_cached_bg_players():
 
     return data
 
+
 def is_app_running(bundle_id, app_name):
     target = f"{bundle_id} {app_name}".lower()
     if "firefox" in target:
@@ -999,6 +969,7 @@ def is_app_running(bundle_id, app_name):
         return is_process_running("Safari")
     return True
 
+
 def is_dedicated_music_app(stream):
     app_name = (stream.get("appName") or "").lower()
     bundle_id = (stream.get("bundleId") or "").lower()
@@ -1009,12 +980,14 @@ def is_dedicated_music_app(stream):
             return True
     return False
 
+
 def stream_sort_key(s):
     is_playing = 100 if s.get("rate") == 1 else 0
     music_bias = 10 if is_dedicated_music_app(s) else 0
     has_rich_meta = 2 if (s.get("artist") or s.get("artwork")) else 0
     recency = float(s.get("updatedAt", 0))
     return (is_playing, music_bias, has_rich_meta, recency)
+
 
 def main():
     if len(sys.argv) > 1:
@@ -1043,7 +1016,6 @@ def main():
     # 1. Fast primary MediaRemote NowPlaying query (~35ms)
     mr_data = get_nowplaying_data()
     primary_stream = None
-    progress_track_key = ""
 
     if mr_data:
         title = mr_data.get("kMRMediaRemoteNowPlayingInfoTitle") or ""
@@ -1093,7 +1065,7 @@ def main():
 
             art_track_key = f"{title}___{artist}___{album}"
             progress_track_key = f"{uid}___{title}___{artist}___{round(duration, 1)}"
-            artwork_url = process_artwork(mr_data, art_track_key, artist, title, bundle_id, app_name)
+            artwork_url = process_artwork(mr_data, art_track_key, artist, title)
             current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
 
             primary_stream = {
@@ -1121,9 +1093,10 @@ def main():
             continue
         if pid in streams_map:
             existing = streams_map[pid]
-            if not p_stream.get("artwork") and existing.get("artwork"):
+            # Always prefer MediaRemote's direct artwork over background fallback
+            if existing.get("artwork"):
                 p_stream["artwork"] = existing["artwork"]
-            elif p_stream.get("artwork") and not existing.get("artwork"):
+            elif p_stream.get("artwork"):
                 existing["artwork"] = p_stream["artwork"]
             if existing.get("album") and not p_stream.get("album"):
                 p_stream["album"] = existing["album"]
@@ -1133,8 +1106,6 @@ def main():
                 p_stream["artist"] = existing["artist"]
 
             if primary_stream and primary_stream.get("id") == pid:
-                # Primary MediaRemote stream has the freshest play/pause & elapsed interpolation;
-                # enrich it with rating/artwork/duration from background player poll if available.
                 if p_stream.get("rating") is not None:
                     primary_stream["rating"] = p_stream["rating"]
                 if p_stream.get("artwork") and not primary_stream.get("artwork"):
@@ -1157,9 +1128,8 @@ def main():
         if not is_dedicated_music_app(s):
             if not (primary_stream and primary_stream.get("id") == s_id):
                 continue
-        # Refresh cached artwork reference in case background worker finished fetching square cover art
-        if not s.get("artwork") or not s["artwork"].startswith("nowplaying.widget/.cache/art_off_"):
-            art_url = process_artwork(None, f"{s.get('title','')}___{s.get('artist','')}___{s.get('album','')}", s.get("artist", ""), s.get("title", ""), s.get("bundleId", ""), s.get("appName", ""))
+        if not s.get("artwork"):
+            art_url = process_artwork(None, f"{s.get('title','')}___{s.get('artist','')}___{s.get('album','')}", s.get("artist", ""), s.get("title", ""))
             if art_url:
                 s["artwork"] = art_url
         active_streams.append(s)
@@ -1204,6 +1174,7 @@ def main():
     }
 
     print(json.dumps(result))
+
 
 if __name__ == "__main__":
     main()
