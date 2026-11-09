@@ -12,6 +12,7 @@ import {
   resolveDragEndAcrossScreens,
   broadcastWidgetMessage,
   initWidgetDesktopSync,
+  openWidgetContextMenu,
 } from './lib/desktop.js';
 
 export const refreshFrequency = 1000;
@@ -979,34 +980,29 @@ export const render = (state, dispatch) => {
           const escapedPayload = payload.replace(/'/g, "'\\''");
           const cmd = `"${helperPath}" '${escapedPayload}' 2>/dev/null || "${fallbackPath}" '${escapedPayload}' 2>/dev/null`;
 
-          run(cmd, (err, output) => {
-            if (err || !output) return;
-            try {
-              const res = JSON.parse(output.trim());
-              if (!res || !res.action) return;
-
-              if (res.action === 'SET_SIZE_PRESET') {
-                dispatch({ type: 'SET_SIZE_PRESET', instanceId: res.instanceId || instance.id, preset: res.preset });
-              } else if (res.action === 'TOGGLE_SNAPPING') {
-                dispatch({ type: 'TOGGLE_SNAPPING' });
-              } else if (res.action === 'RESET_POSITION') {
-                dispatch({ type: 'RESET_POSITION', instanceId: res.instanceId || instance.id });
-              } else if (res.action === 'RELOAD_WIDGET') {
-                const wid = res.widgetId || 'nowplaying-widget-index-jsx';
-                run(`osascript -e 'tell application id "tracesOf.Uebersicht" to reload widget id "${wid}"' 2>/dev/null || osascript -e 'tell application id "tracesOf.Uebersicht" to refresh'`);
-              } else if (res.action === 'REMOVE_WIDGET') {
-                dispatch({ type: 'REMOVE_WIDGET', instanceId: res.instanceId || instance.id, widgetId: res.widgetId || 'nowplaying-widget-index-jsx' });
-              } else if (res.action === 'DUPLICATE_WIDGET') {
-                dispatch({ type: 'DUPLICATE_WIDGET', instanceId: res.instanceId || instance.id });
-              } else if (res.action === 'SET_STREAM_INDEX') {
-                dispatch({ type: 'SET_STREAM_INDEX', instanceId: res.instanceId || instance.id, index: res.index });
-              } else if (res.action === 'MOVE_TO_SCREEN') {
-                dispatch({ type: 'MOVE_TO_SCREEN', screenId: res.screenId, instanceId: res.instanceId || instance.id });
-              } else if (res.action === 'ORDER_FRONT' || res.action === 'ORDER_FORWARD' || res.action === 'ORDER_BACKWARD' || res.action === 'ORDER_BACK') {
-                reorderWidget('nowplaying', res.action);
-                dispatch({ type: 'ORDER_CHANGED' });
-              }
-            } catch (parseErr) {}
+          openWidgetContextMenu('nowplaying', payload, cmd, run, (res) => {
+            if (!res || !res.action) return;
+            if (res.action === 'SET_SIZE_PRESET') {
+              dispatch({ type: 'SET_SIZE_PRESET', instanceId: res.instanceId || instance.id, preset: res.preset });
+            } else if (res.action === 'TOGGLE_SNAPPING') {
+              dispatch({ type: 'TOGGLE_SNAPPING' });
+            } else if (res.action === 'RESET_POSITION') {
+              dispatch({ type: 'RESET_POSITION', instanceId: res.instanceId || instance.id });
+            } else if (res.action === 'RELOAD_WIDGET') {
+              const wid = res.widgetId || 'nowplaying-widget-index-jsx';
+              run(`osascript -e 'tell application id "tracesOf.Uebersicht" to reload widget id "${wid}"' 2>/dev/null || osascript -e 'tell application id "tracesOf.Uebersicht" to refresh'`);
+            } else if (res.action === 'REMOVE_WIDGET') {
+              dispatch({ type: 'REMOVE_WIDGET', instanceId: res.instanceId || instance.id, widgetId: res.widgetId || 'nowplaying-widget-index-jsx' });
+            } else if (res.action === 'DUPLICATE_WIDGET') {
+              dispatch({ type: 'DUPLICATE_WIDGET', instanceId: res.instanceId || instance.id });
+            } else if (res.action === 'SET_STREAM_INDEX') {
+              dispatch({ type: 'SET_STREAM_INDEX', instanceId: res.instanceId || instance.id, index: res.index });
+            } else if (res.action === 'MOVE_TO_SCREEN') {
+              dispatch({ type: 'MOVE_TO_SCREEN', screenId: res.screenId, instanceId: res.instanceId || instance.id });
+            } else if (res.action === 'ORDER_FRONT' || res.action === 'ORDER_FORWARD' || res.action === 'ORDER_BACKWARD' || res.action === 'ORDER_BACK') {
+              reorderWidget('nowplaying', res.action);
+              dispatch({ type: 'ORDER_CHANGED' });
+            }
           });
         };
 
