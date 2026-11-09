@@ -14,10 +14,11 @@ import urllib.parse
 CACHE_TRACK_FILE = "/tmp/nowplaying_track.txt"
 CACHE_ART_FILE = "/tmp/nowplaying_art_data.txt"
 CACHE_STATE_FILE = "/tmp/nowplaying_state.json"
-CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache_v5.json"
+CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache_v6.json"
 CACHE_RATINGS_FILE = "/tmp/nowplaying_ratings.json"
-CACHE_ART_DIR = "/tmp/nowplaying_art_cache_v5"
-CACHE_YTMUSIC_ART_FILE = "/tmp/nowplaying_ytmusic_art_v5.txt"
+CACHE_ART_DIR = "/tmp/nowplaying_art_cache_v6"
+CACHE_YTMUSIC_ART_FILE = "/tmp/nowplaying_ytmusic_art_v6.txt"
+CACHE_LAST_MR_ART_FILE = "/tmp/nowplaying_last_mr_art_v6.json"
 CACHE_APP_ICON_DIR = "/tmp/nowplaying_app_icons_v5"
 CACHE_APP_ICON_SCRIPT = "/tmp/nowplaying_get_app_icon_v5.js"
 CACHE_BG_PLAYERS_FILE = "/tmp/nowplaying_bg_players_v5.json"
@@ -446,28 +447,86 @@ def process_artwork(data, track_key, artist="", title=""):
     if raw_art and isinstance(raw_art, str):
         raw_clean = "".join(raw_art.split())
         if raw_clean:
-            raw_sig = f"{raw_clean[:512]}_{len(raw_clean)}_{ raw_clean[-256:] if len(raw_clean) > 256 else '' }"
-            raw_hash = hashlib.md5(raw_sig.encode("ascii", errors="ignore")).hexdigest()
+            # Hash the full base64 payload so uncompressed 544x544 TIFFs with identical border pixels never collide
+            raw_hash = hashlib.md5(raw_clean.encode("ascii", errors="ignore")).hexdigest()
             raw_cache_file = os.path.join(CACHE_ART_DIR, f"raw_{raw_hash}.txt")
 
-            cached_raw = read_cached_data_url(raw_cache_file)
-            if cached_raw:
-                if not os.path.exists(direct_file):
-                    write_cached_data_url(direct_file, cached_raw)
-                return cached_raw
+            now = time.time()
+            album = (data.get("kMRMediaRemoteNowPlayingInfoAlbum") or "").strip() if data else ""
+            if album == "null":
+                album = ""
+            artist_clean = (artist or "").strip().lower()
+            album_clean = album.lower()
 
-            try:
-                art_bytes = base64.b64decode(raw_clean)
-                data_url = bytes_to_data_url(art_bytes)
-                if data_url:
-                    write_cached_data_url(raw_cache_file, data_url)
-                    write_cached_data_url(direct_file, data_url)
-                    b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower() if data else ""
-                    if "webapp" in b_id or "safari" in b_id or "webkit" in b_id:
-                        write_cached_data_url(CACHE_YTMUSIC_ART_FILE, data_url)
-                    return data_url
-            except Exception:
-                pass
+            is_stale_carryover = False
+            last_mr = {}
+            if os.path.exists(CACHE_LAST_MR_ART_FILE):
+                try:
+                    with open(CACHE_LAST_MR_ART_FILE, "r") as f:
+                        last_mr = json.load(f)
+                except Exception:
+                    last_mr = {}
+
+            prev_track_hash = last_mr.get("track_hash", "")
+            prev_raw_hash = last_mr.get("raw_hash", "")
+            prev_artist = last_mr.get("artist", "")
+            prev_album = last_mr.get("album", "")
+            changed_at = float(last_mr.get("changed_at", 0.0))
+
+            if prev_track_hash and prev_track_hash != track_hash:
+                same_source = (
+                    (artist_clean and artist_clean == prev_artist)
+                    or (album_clean and album_clean == prev_album)
+                )
+                if not same_source and raw_hash == prev_raw_hash:
+                    if changed_at <= 0.0:
+                        changed_at = now
+                        try:
+                            with open(CACHE_LAST_MR_ART_FILE, "w") as f:
+                                json.dump({
+                                    "track_hash": prev_track_hash,
+                                    "raw_hash": prev_raw_hash,
+                                    "artist": prev_artist,
+                                    "album": prev_album,
+                                    "changed_at": changed_at
+                                }, f)
+                        except Exception:
+                            pass
+                    if (now - changed_at) < 2.5:
+                        is_stale_carryover = True
+
+            if not is_stale_carryover:
+                try:
+                    with open(CACHE_LAST_MR_ART_FILE, "w") as f:
+                        json.dump({
+                            "track_hash": track_hash,
+                            "raw_hash": raw_hash,
+                            "artist": artist_clean,
+                            "album": album_clean,
+                            "changed_at": 0.0
+                        }, f)
+                except Exception:
+                    pass
+
+                cached_raw = read_cached_data_url(raw_cache_file)
+                if cached_raw:
+                    existing_direct = read_cached_data_url(direct_file)
+                    if existing_direct != cached_raw:
+                        write_cached_data_url(direct_file, cached_raw)
+                    return cached_raw
+
+                try:
+                    art_bytes = base64.b64decode(raw_clean)
+                    data_url = bytes_to_data_url(art_bytes)
+                    if data_url:
+                        write_cached_data_url(raw_cache_file, data_url)
+                        write_cached_data_url(direct_file, data_url)
+                        b_id = (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") or "").lower() if data else ""
+                        if "webapp" in b_id or "safari" in b_id or "webkit" in b_id:
+                            write_cached_data_url(CACHE_YTMUSIC_ART_FILE, data_url)
+                        return data_url
+                except Exception:
+                    pass
 
     # 2. Cached direct artwork previously provided by the media player for this track
     cached_direct = read_cached_data_url(direct_file)
