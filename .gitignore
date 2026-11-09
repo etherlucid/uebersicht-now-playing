@@ -1,1 +1,6 @@
 .DS_Store
+nowplaying.widget/.cache/
+nowplaying.widget/.art_cache*
+nowplaying.widget/.ytm_live_cache.json
+nowplaying.widget/.last_known_stream.json
+nowplaying.widget/.pending_action

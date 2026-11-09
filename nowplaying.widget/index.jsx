@@ -1,184 +1,43 @@
 import { React, run } from 'uebersicht';
+import {
+  SNAP_MARGIN_X,
+  SNAP_MARGIN_TOP,
+  getWidgetZIndex,
+  reorderWidget,
+  getScreenId,
+  resolveActiveScreen,
+  isScreenActive,
+  calculateSnappedPosition,
+  computeCrossScreenPreview,
+  resolveDragEndAcrossScreens,
+  broadcastWidgetMessage,
+  initWidgetDesktopSync,
+} from './lib/desktop.js';
 
 export const refreshFrequency = 1000;
 
 export const command = `python3 "$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/get_song.py" 2>/dev/null || python3 "nowplaying.widget/get_song.py" 2>/dev/null || python3 "ytmusic.widget/get_song.py"`;
 
 const STORAGE_KEY = 'nowplaying_widget_position';
+const STORAGE_INSTANCES_KEY = 'nowplaying_widget_instances_v2';
 const STORAGE_SIZE_KEY = 'nowplaying_widget_size_preset';
 const STORAGE_RATINGS_KEY = 'nowplaying_widget_ratings';
 const STORAGE_SNAP_KEY = 'nowplaying_widget_enable_snap';
-const SCREEN_MARGIN = 0;
-const SNAP_THRESHOLD = 6;
-const SNAP_EDGE_TOLERANCE = 3;
-const SNAP_MARGIN_X = 15;
-const SNAP_MARGIN_TOP = 14;
-const SNAP_MARGIN_BOTTOM = 14;
-
-const WIDGET_ORDER_KEY = 'uebersicht_widget_order';
-const DEFAULT_WIDGET_ORDER = ['sticker', 'cava', 'shell', 'nowplaying'];
-
-const getWidgetZIndex = (widgetId) => {
-  try {
-    const raw = localStorage.getItem(WIDGET_ORDER_KEY);
-    let order = raw ? JSON.parse(raw) : [...DEFAULT_WIDGET_ORDER];
-    if (!Array.isArray(order)) order = [...DEFAULT_WIDGET_ORDER];
-    let idx = order.indexOf(widgetId);
-    if (idx === -1) {
-      order.push(widgetId);
-      localStorage.setItem(WIDGET_ORDER_KEY, JSON.stringify(order));
-      idx = order.length - 1;
-    }
-    return 100 + idx * 50;
-  } catch (e) {
-    return 100;
-  }
-};
-
-const reorderWidget = (widgetId, action) => {
-  try {
-    const raw = localStorage.getItem(WIDGET_ORDER_KEY);
-    let order = raw ? JSON.parse(raw) : [...DEFAULT_WIDGET_ORDER];
-    if (!Array.isArray(order)) order = [...DEFAULT_WIDGET_ORDER];
-    if (!order.includes(widgetId)) {
-      order.push(widgetId);
-    }
-    const idx = order.indexOf(widgetId);
-    if (action === 'ORDER_FRONT' || action === 'BRING_TO_FRONT') {
-      order.splice(idx, 1);
-      order.push(widgetId);
-    } else if (action === 'ORDER_BACK' || action === 'SEND_TO_BACK') {
-      order.splice(idx, 1);
-      order.unshift(widgetId);
-    } else if (action === 'ORDER_FORWARD' || action === 'BRING_FORWARD') {
-      if (idx < order.length - 1) {
-        const temp = order[idx];
-        order[idx] = order[idx + 1];
-        order[idx + 1] = temp;
-      }
-    } else if (action === 'ORDER_BACKWARD' || action === 'SEND_BACKWARD') {
-      if (idx > 0) {
-        const temp = order[idx];
-        order[idx] = order[idx - 1];
-        order[idx - 1] = temp;
-      }
-    }
-    localStorage.setItem(WIDGET_ORDER_KEY, JSON.stringify(order));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('uebersicht:order-changed', { detail: { order } }));
-    }
-  } catch (e) {}
-};
-
-const calculateSnappedPosition = (rawX, rawY, cardWidth, cardHeight, bypassSnap = false, allowOverflow = true) => {
-  const winW = window.innerWidth || 1920;
-  const winH = window.innerHeight || 1080;
-
-  const maxX = Math.max(0, winW - cardWidth);
-  const maxY = Math.max(0, winH - cardHeight);
-
-  let newX = allowOverflow ? rawX : Math.max(0, Math.min(maxX, rawX));
-  let newY = Math.max(0, Math.min(maxY, rawY));
-
-  if (!bypassSnap && newX >= 0 && newX <= maxX) {
-    const snapTop = SNAP_MARGIN_TOP;
-    const snapBottom = Math.max(0, winH - cardHeight - SNAP_MARGIN_BOTTOM);
-    const snapLeft = SNAP_MARGIN_X;
-    const snapRight = Math.max(0, winW - cardWidth - SNAP_MARGIN_X);
-
-    if (newX >= snapLeft - SNAP_EDGE_TOLERANCE && newX <= snapLeft + SNAP_THRESHOLD) {
-      newX = snapLeft;
-    } else if (newX >= snapRight - SNAP_THRESHOLD && newX <= snapRight + SNAP_EDGE_TOLERANCE) {
-      newX = snapRight;
-    }
-
-    if (newY >= snapTop - SNAP_EDGE_TOLERANCE && newY <= snapTop + SNAP_THRESHOLD) {
-      newY = snapTop;
-    } else if (newY >= snapBottom - SNAP_THRESHOLD && newY <= snapBottom + SNAP_EDGE_TOLERANCE) {
-      newY = snapBottom;
-    }
-  }
-
-  return { x: newX, y: newY };
-};
-
 const STORAGE_ACTIVE_SCREEN_KEY = 'nowplaying_active_screen';
-
-let syncChannel = null;
-try {
-  if (typeof BroadcastChannel !== 'undefined') {
-    syncChannel = new BroadcastChannel('uebersicht_multi_screen_sync');
-  }
-} catch (e) {}
-
-const getScreenId = () => {
-  try {
-    if (typeof window !== 'undefined' && window.location && window.location.pathname) {
-      const match = window.location.pathname.match(/\/(\d+)/);
-      if (match) return `screen_${match[1]}`;
-      const parts = window.location.pathname.split('/').filter(Boolean);
-      if (parts.length > 0 && !isNaN(Number(parts[0]))) {
-        return `screen_${parts[0]}`;
-      }
-    }
-  } catch (e) {}
-  try {
-    if (typeof window !== 'undefined' && window.screen) {
-      return `screen_${window.screen.width}x${window.screen.height}`;
-    }
-  } catch (e) {}
-  return 'screen_3';
-};
-
-const isMainScreen = (screenId) => {
-  if (screenId === 'screen_3' || screenId === 'screen_0') return true;
-  if (typeof window !== 'undefined') {
-    if (window.screen && window.screen.width === 2560) return true;
-    if (window.innerWidth === 2560) return true;
-  }
-  return false;
-};
-
-const isSecondaryScreen = (screenId) => {
-  if (screenId === 'screen_2' || screenId === 'screen_1') return true;
-  if (typeof window !== 'undefined') {
-    if (window.screen && (window.screen.width === 1080 || window.screen.height === 1920)) return true;
-    if (window.innerWidth === 1080 || window.innerHeight === 1920) return true;
-  }
-  return false;
-};
-
-const isScreenActive = (currentScreenId, activeScreen) => {
-  if (!activeScreen) return isMainScreen(currentScreenId);
-  if (activeScreen === currentScreenId) return true;
-  if (activeScreen === 'all') return true;
-
-  const isTargetMain = (activeScreen === 'screen_0' || activeScreen === 'screen_3' || activeScreen.includes('2560'));
-  if (isTargetMain && isMainScreen(currentScreenId)) return true;
-
-  const isTargetSecondary = (activeScreen === 'screen_1' || activeScreen === 'screen_2' || activeScreen.includes('1080x1920'));
-  if (isTargetSecondary && isSecondaryScreen(currentScreenId)) return true;
-
-  // Failsafe: if activeScreen matches neither monitor, ALWAYS show on main monitor so widget is NEVER permanently lost
-  if (!isTargetMain && !isTargetSecondary && isMainScreen(currentScreenId)) {
-    return true;
-  }
-
-  return false;
-};
+const SCREEN_MARGIN = 0;
 
 const getActiveScreen = () => {
   try {
     const saved = localStorage.getItem(STORAGE_ACTIVE_SCREEN_KEY);
-    if (saved) return saved;
+    if (saved) return resolveActiveScreen(saved);
   } catch (e) {}
-  return 'screen_3';
+  return resolveActiveScreen(null);
 };
 
 const getInitialSizePreset = () => {
   const screenId = getScreenId();
   try {
-    const saved = localStorage.getItem(`${STORAGE_SIZE_KEY}_${screenId}`) ?? localStorage.getItem(STORAGE_SIZE_KEY);
+    const saved = localStorage.getItem(STORAGE_SIZE_KEY) ?? localStorage.getItem(`${STORAGE_SIZE_KEY}_${screenId}`);
     if (saved === 'small' || saved === 'medium' || saved === 'large') {
       return saved;
     }
@@ -197,7 +56,7 @@ const getInitialRatings = () => {
 const getInitialSnapping = () => {
   const screenId = getScreenId();
   try {
-    const saved = localStorage.getItem(`${STORAGE_SNAP_KEY}_${screenId}`) ?? localStorage.getItem(STORAGE_SNAP_KEY);
+    const saved = localStorage.getItem(STORAGE_SNAP_KEY) ?? localStorage.getItem(`${STORAGE_SNAP_KEY}_${screenId}`);
     if (saved !== null) {
       return saved === 'true';
     }
@@ -207,6 +66,16 @@ const getInitialSnapping = () => {
 
 const getInitialInstances = () => {
   const screenId = getScreenId();
+  try {
+    const savedCanonical = localStorage.getItem(STORAGE_INSTANCES_KEY);
+    if (savedCanonical) {
+      const parsed = JSON.parse(savedCanonical);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {}
+
   try {
     const saved = localStorage.getItem(`${STORAGE_KEY}_instances_${screenId}`);
     if (saved) {
@@ -218,22 +87,7 @@ const getInitialInstances = () => {
   } catch (e) {}
 
   try {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_${screenId}`);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-        return [{
-          id: 'default',
-          x: Math.max(SCREEN_MARGIN, parsed.x),
-          y: Math.max(SCREEN_MARGIN, parsed.y),
-          sizePreset: getInitialSizePreset(),
-        }];
-      }
-    }
-  } catch (e) {}
-
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('ytmusic_widget_position');
+    const saved = localStorage.getItem(`${STORAGE_KEY}_${screenId}`) || localStorage.getItem(STORAGE_KEY) || localStorage.getItem('ytmusic_widget_position');
     if (saved) {
       const parsed = JSON.parse(saved);
       if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
@@ -255,12 +109,15 @@ const getInitialInstances = () => {
   }];
 };
 
-const saveInstances = (instances) => {
-  const screenId = getScreenId();
+const saveInstances = (instances, targetScreenId) => {
+  const screenId = targetScreenId || getScreenId();
   try {
+    localStorage.setItem(STORAGE_INSTANCES_KEY, JSON.stringify(instances));
     localStorage.setItem(`${STORAGE_KEY}_instances_${screenId}`, JSON.stringify(instances));
     if (instances && instances[0]) {
-      localStorage.setItem(`${STORAGE_KEY}_${screenId}`, JSON.stringify({ x: instances[0].x, y: instances[0].y }));
+      const posJson = JSON.stringify({ x: instances[0].x, y: instances[0].y });
+      localStorage.setItem(`${STORAGE_KEY}_${screenId}`, posJson);
+      localStorage.setItem(STORAGE_KEY, posJson);
     }
   } catch (e) {}
 };
@@ -283,6 +140,10 @@ export const initialState = {
   dragStartY: 0,
   startPosX: 0,
   startPosY: 0,
+  lastClientX: 0,
+  lastClientY: 0,
+  lastBypassSnap: false,
+  crossScreenPreview: null,
   cardWidth: initialPreset === 'small' ? 154 : 300,
   cardHeight: initialPreset === 'small' ? 154 : (initialPreset === 'large' ? 398 : 154),
   data: { playing: false, streams: [] },
@@ -322,10 +183,9 @@ export const updateState = (event, previousState) => {
         }
       }
 
-      const maxIdx = Math.max(0, streams.length - 1);
       let activeIdx = 0;
       if (previousState.userSelectedStreamId) {
-        const foundIdx = streams.findIndex(s => s.id === previousState.userSelectedStreamId);
+        const foundIdx = streams.findIndex((s) => s.id === previousState.userSelectedStreamId);
         if (foundIdx !== -1) {
           activeIdx = foundIdx;
         }
@@ -475,20 +335,6 @@ export const updateState = (event, previousState) => {
     };
   }
 
-  if (event.type === 'TICK') {
-    const streams = (previousState.data && previousState.data.streams && previousState.data.streams.length > 0)
-      ? previousState.data.streams
-      : (previousState.data && previousState.data.title ? [previousState.data] : []);
-    const activeStream = streams[previousState.activeStreamIndex || 0] || previousState.data;
-    if (!activeStream || !activeStream.title || activeStream.rate === 0) {
-      return previousState;
-    }
-    return {
-      ...previousState,
-      tick: event.now,
-    };
-  }
-
   if (event.type === 'START_DRAG') {
     return {
       ...previousState,
@@ -496,6 +342,8 @@ export const updateState = (event, previousState) => {
       draggingInstanceId: event.instanceId,
       dragStartX: event.clientX,
       dragStartY: event.clientY,
+      lastClientX: event.clientX,
+      lastClientY: event.clientY,
       startPosX: event.startPosX !== undefined ? event.startPosX : previousState.x,
       startPosY: event.startPosY !== undefined ? event.startPosY : previousState.y,
       cardWidth: event.cardWidth || previousState.cardWidth || 300,
@@ -515,7 +363,8 @@ export const updateState = (event, previousState) => {
       previousState.startPosY + deltaY,
       cardWidth,
       cardHeight,
-      bypassSnap
+      bypassSnap,
+      true
     );
 
     const updatedInstances = (previousState.instances || []).map((inst) => {
@@ -525,13 +374,28 @@ export const updateState = (event, previousState) => {
       return inst;
     });
 
-    saveInstances(updatedInstances);
+    const currentScreenId = getScreenId();
+    const preview = computeCrossScreenPreview({
+      currentScreenId,
+      curX: newX,
+      curY: newY,
+      cardW: cardWidth,
+      cardH: cardHeight,
+    });
+
+    broadcastWidgetMessage('nowplaying', {
+      type: 'CROSS_SCREEN_DRAG_PREVIEW',
+      preview,
+    });
 
     return {
       ...previousState,
       instances: updatedInstances,
       x: updatedInstances[0]?.x ?? newX,
       y: updatedInstances[0]?.y ?? newY,
+      lastClientX: event.clientX,
+      lastClientY: event.clientY,
+      lastBypassSnap: bypassSnap,
     };
   }
 
@@ -542,26 +406,22 @@ export const updateState = (event, previousState) => {
     const cardHeight = previousState.cardHeight || 160;
     const curX = currentInst?.x ?? previousState.x ?? 0;
     const curY = currentInst?.y ?? previousState.y ?? 0;
-
-    const winW = typeof window !== 'undefined' ? (window.innerWidth || 1920) : 1920;
-    const winH = typeof window !== 'undefined' ? (window.innerHeight || 1080) : 1080;
     const currentScreenId = getScreenId();
-    const isMain = isMainScreen(currentScreenId);
 
-    let targetScreen = previousState.activeScreen || currentScreenId;
-    let finalX = curX;
-    let finalY = Math.max(14, Math.min(winH - cardHeight - 14, curY));
+    const resolution = resolveDragEndAcrossScreens({
+      currentScreenId,
+      curX,
+      curY,
+      cardW: cardWidth,
+      cardH: cardHeight,
+      clientX: event.clientX ?? previousState.lastClientX,
+      clientY: event.clientY ?? previousState.lastClientY,
+      bypassSnap: previousState.lastBypassSnap,
+    });
 
-    // Monitor arrangement: Main (LG WFHD, left, 2560x1080, screen_3) <-> Secondary (ASUS PB287Q, right, 1080x1920, screen_2)
-    if (isMain && curX + (cardWidth / 3) > winW) {
-      targetScreen = 'screen_2';
-      finalX = 14;
-    } else if (!isMain && curX < -(cardWidth / 3)) {
-      targetScreen = 'screen_3';
-      finalX = Math.max(14, 2560 - cardWidth - 14);
-    } else {
-      finalX = Math.max(0, Math.min(winW - cardWidth, curX));
-    }
+    const targetScreen = resolution.targetScreen || currentScreenId;
+    const finalX = resolution.x;
+    const finalY = resolution.y;
 
     try {
       localStorage.setItem(STORAGE_ACTIVE_SCREEN_KEY, targetScreen);
@@ -574,22 +434,26 @@ export const updateState = (event, previousState) => {
       return inst;
     });
 
-    saveInstances(updatedInstances);
+    saveInstances(updatedInstances, targetScreen);
 
-    if (syncChannel) {
-      syncChannel.postMessage({
-        widget: 'nowplaying',
-        type: 'ACTIVE_SCREEN_CHANGED',
-        activeScreen: targetScreen,
-        x: finalX,
-        y: finalY,
-      });
-    }
+    broadcastWidgetMessage('nowplaying', {
+      type: 'CROSS_SCREEN_DRAG_PREVIEW',
+      preview: null,
+    });
+
+    broadcastWidgetMessage('nowplaying', {
+      type: 'ACTIVE_SCREEN_CHANGED',
+      activeScreen: targetScreen,
+      instances: updatedInstances,
+      x: finalX,
+      y: finalY,
+    });
 
     return {
       ...previousState,
       isDragging: false,
       draggingInstanceId: null,
+      crossScreenPreview: null,
       activeScreen: targetScreen,
       instances: updatedInstances,
       x: finalX,
@@ -598,7 +462,7 @@ export const updateState = (event, previousState) => {
   }
 
   if (event.type === 'MOVE_TO_SCREEN') {
-    const targetScreen = event.screenId || 'screen_1';
+    const targetScreen = resolveActiveScreen(event.screenId || getScreenId());
     try {
       localStorage.setItem(STORAGE_ACTIVE_SCREEN_KEY, targetScreen);
     } catch (e) {}
@@ -613,20 +477,19 @@ export const updateState = (event, previousState) => {
       x: finalX,
       y: finalY,
     }));
-    saveInstances(updatedInstances);
+    saveInstances(updatedInstances, targetScreen);
 
-    if (syncChannel) {
-      syncChannel.postMessage({
-        widget: 'nowplaying',
-        type: 'ACTIVE_SCREEN_CHANGED',
-        activeScreen: targetScreen,
-        x: finalX,
-        y: finalY,
-      });
-    }
+    broadcastWidgetMessage('nowplaying', {
+      type: 'ACTIVE_SCREEN_CHANGED',
+      activeScreen: targetScreen,
+      instances: updatedInstances,
+      x: finalX,
+      y: finalY,
+    });
 
     return {
       ...previousState,
+      crossScreenPreview: null,
       activeScreen: targetScreen,
       instances: updatedInstances,
       x: finalX,
@@ -636,7 +499,9 @@ export const updateState = (event, previousState) => {
 
   if (event.type === 'SYNC_ACTIVE_SCREEN') {
     let updatedInstances = previousState.instances;
-    if (typeof event.x === 'number' && typeof event.y === 'number') {
+    if (Array.isArray(event.instances) && event.instances.length > 0) {
+      updatedInstances = event.instances;
+    } else if (typeof event.x === 'number' && typeof event.y === 'number') {
       updatedInstances = (previousState.instances || []).map((inst) => ({
         ...inst,
         x: event.x,
@@ -645,10 +510,31 @@ export const updateState = (event, previousState) => {
     }
     return {
       ...previousState,
-      activeScreen: event.activeScreen,
+      crossScreenPreview: null,
+      activeScreen: resolveActiveScreen(event.activeScreen),
       instances: updatedInstances,
-      x: event.x !== undefined ? event.x : previousState.x,
-      y: event.y !== undefined ? event.y : previousState.y,
+      x: event.x !== undefined ? event.x : (updatedInstances[0]?.x ?? previousState.x),
+      y: event.y !== undefined ? event.y : (updatedInstances[0]?.y ?? previousState.y),
+    };
+  }
+
+  if (event.type === 'CROSS_SCREEN_DRAG_PREVIEW') {
+    return {
+      ...previousState,
+      crossScreenPreview: event.preview || null,
+    };
+  }
+
+  if (event.type === 'TOPOLOGY_UPDATED') {
+    const resolved = resolveActiveScreen(previousState.activeScreen, event.topology);
+    if (resolved !== previousState.activeScreen) {
+      try {
+        localStorage.setItem(STORAGE_ACTIVE_SCREEN_KEY, resolved);
+      } catch (e) {}
+    }
+    return {
+      ...previousState,
+      activeScreen: resolved,
     };
   }
 
@@ -673,7 +559,7 @@ export const updateState = (event, previousState) => {
       }
       return i;
     });
-    saveInstances(updatedInstances);
+    saveInstances(updatedInstances, previousState.activeScreen);
 
     const screenId = getScreenId();
     try {
@@ -703,7 +589,7 @@ export const updateState = (event, previousState) => {
       }
       return i;
     });
-    saveInstances(updatedInstances);
+    saveInstances(updatedInstances, previousState.activeScreen);
     return {
       ...previousState,
       instances: updatedInstances,
@@ -716,7 +602,7 @@ export const updateState = (event, previousState) => {
     const current = previousState.instances && previousState.instances.length > 0
       ? previousState.instances
       : [{ id: 'default', x: previousState.x || SNAP_MARGIN_X, y: previousState.y || SNAP_MARGIN_TOP, sizePreset: previousState.sizePreset || 'medium' }];
-    const target = current.find(i => i.id === event.instanceId) || current[current.length - 1];
+    const target = current.find((i) => i.id === event.instanceId) || current[current.length - 1];
     const newInst = {
       ...target,
       id: `inst_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -724,7 +610,7 @@ export const updateState = (event, previousState) => {
       y: (target.y || SNAP_MARGIN_TOP) + 30,
     };
     const updatedInstances = [...current, newInst];
-    saveInstances(updatedInstances);
+    saveInstances(updatedInstances, previousState.activeScreen);
     return {
       ...previousState,
       instances: updatedInstances,
@@ -734,8 +620,8 @@ export const updateState = (event, previousState) => {
   if (event.type === 'REMOVE_WIDGET') {
     const current = previousState.instances || [];
     if (current.length > 1) {
-      const updatedInstances = current.filter(i => i.id !== event.instanceId);
-      saveInstances(updatedInstances);
+      const updatedInstances = current.filter((i) => i.id !== event.instanceId);
+      saveInstances(updatedInstances, previousState.activeScreen);
       return {
         ...previousState,
         instances: updatedInstances,
@@ -765,82 +651,103 @@ const formatTime = (secs) => {
 };
 
 let currentDispatch = null;
-if (typeof window !== 'undefined' && !window.__nowplaying_ticker_started) {
-  window.__nowplaying_ticker_started = true;
-  setInterval(() => {
-    if (currentDispatch) {
-      currentDispatch({ type: 'TICK', now: Date.now() });
-    }
-  }, 500);
-}
 
-if (typeof window !== 'undefined' && !window.__uebersicht_order_listener_nowplaying) {
-  window.__uebersicht_order_listener_nowplaying = true;
-  window.addEventListener('uebersicht:order-changed', () => {
-    if (currentDispatch) {
-      currentDispatch({ type: 'ORDER_CHANGED' });
-    }
-  });
-}
-
-if (typeof window !== 'undefined' && !window.__uebersicht_nowplaying_sync_listener) {
-  window.__uebersicht_nowplaying_sync_listener = true;
-
-  if (syncChannel) {
-    syncChannel.addEventListener('message', (event) => {
-      const data = event.data;
-      if (data && data.widget === 'nowplaying' && currentDispatch) {
-        currentDispatch({
-          type: 'SYNC_ACTIVE_SCREEN',
-          activeScreen: data.activeScreen,
-          x: data.x,
-          y: data.y,
-        });
-      }
-    });
-  }
-
-  window.addEventListener('storage', (event) => {
-    if (event.key === STORAGE_ACTIVE_SCREEN_KEY && event.newValue && currentDispatch) {
-      currentDispatch({
-        type: 'SYNC_ACTIVE_SCREEN',
-        activeScreen: event.newValue,
+// 60fps direct-DOM progress bar & elapsed time interpolator (zero React re-renders per frame)
+let activePlaybackMeta = new Map();
+if (typeof window !== 'undefined' && !window.__nowplaying_raf_started) {
+  window.__nowplaying_raf_started = true;
+  let lastRaffedTs = 0;
+  const tickProgress = (ts) => {
+    if (ts - lastRaffedTs >= 100) {
+      lastRaffedTs = ts;
+      const nowMs = Date.now();
+      activePlaybackMeta.forEach((meta, instId) => {
+        if (!meta || !meta.isPlaying || meta.isPaused || !(meta.duration > 0)) return;
+        const dt = Math.max(0, (nowMs - meta.clientReceivedAt) / 1000);
+        const curElapsed = Math.min(meta.duration, meta.baseElapsed + dt);
+        const pct = Math.min(100, Math.max(0, (curElapsed / meta.duration) * 100));
+        const fillEl = document.querySelector(`[data-np-fill="${instId}"]`);
+        if (fillEl) {
+          fillEl.style.width = `${pct.toFixed(2)}%`;
+        }
+        const timeEl = document.querySelector(`[data-np-elapsed="${instId}"]`);
+        if (timeEl) {
+          const formatted = formatTime(curElapsed);
+          if (timeEl.textContent !== formatted) {
+            timeEl.textContent = formatted;
+          }
+        }
       });
     }
-  });
-
-  const checkScreens = () => {
-    const helperPath = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/menu_helper';
-    const fallbackPath = './nowplaying.widget/menu_helper';
-    run(`"${helperPath}" --screens 2>/dev/null || "${fallbackPath}" --screens 2>/dev/null`, (err, out) => {
-      if (err || !out) return;
-      try {
-        const screens = JSON.parse(out.trim());
-        if (Array.isArray(screens) && screens.length === 1 && currentDispatch) {
-          currentDispatch({ type: 'MOVE_TO_SCREEN', screenId: 'screen_0' });
-        }
-      } catch (e) {}
-    });
+    window.requestAnimationFrame(tickProgress);
   };
-
-  window.addEventListener('resize', checkScreens);
-  setTimeout(checkScreens, 1500);
+  window.requestAnimationFrame(tickProgress);
 }
+
+initWidgetDesktopSync({
+  widgetName: 'nowplaying',
+  helperCommand: `"$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/menu_helper" --screens 2>/dev/null || "./nowplaying.widget/menu_helper" --screens 2>/dev/null`,
+  run,
+  getDispatch: () => currentDispatch,
+  onSyncPacket: (data, dispatch) => {
+    if (data.type === 'ACTIVE_SCREEN_CHANGED') {
+      dispatch({
+        type: 'SYNC_ACTIVE_SCREEN',
+        activeScreen: data.activeScreen,
+        instances: data.instances,
+        x: data.x,
+        y: data.y,
+      });
+    } else if (data.type === 'CROSS_SCREEN_DRAG_PREVIEW') {
+      dispatch({
+        type: 'CROSS_SCREEN_DRAG_PREVIEW',
+        preview: data.preview,
+      });
+    }
+  },
+});
 
 export const render = (state, dispatch) => {
   currentDispatch = dispatch;
   const currentScreenId = getScreenId();
   const activeScreen = state?.activeScreen || getActiveScreen();
+  const isCurrentActive = isScreenActive(currentScreenId, activeScreen);
+  const preview = state?.crossScreenPreview;
 
-  if (!isScreenActive(currentScreenId, activeScreen)) {
+  if (!isCurrentActive && (!preview || preview.targetScreen !== currentScreenId)) {
     return <div style={{ display: 'none' }} />;
   }
+
   const {
     data,
     error,
     sizePreset: defaultSizePreset = 'medium',
     enableSnapping = true,
   } = state || {};
+
+  // Render live cross-bezel ghost card when dragging from another screen onto this screen
+  if (!isCurrentActive && preview && preview.targetScreen === currentScreenId) {
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          transform: `translate3d(${preview.x}px, ${preview.y}px, 0)`,
+          width: `${preview.w}px`,
+          height: `${preview.h}px`,
+          borderRadius: '20px',
+          backgroundColor: 'rgba(24, 24, 28, 0.72)',
+          backdropFilter: 'blur(24px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+          border: '1.5px solid rgba(255, 255, 255, 0.28)',
+          boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
+          zIndex: 9999,
+          pointerEvents: 'none',
+        }}
+      />
+    );
+  }
 
   const instances = (state && state.instances && state.instances.length > 0)
     ? state.instances
@@ -882,17 +789,41 @@ export const render = (state, dispatch) => {
             cardHeight,
           });
 
-          const handleMouseMove = (moveEvent) => {
+          let rafId = null;
+          let latestMove = null;
+
+          const flushMove = () => {
+            rafId = null;
+            if (!latestMove) return;
             dispatch({
               type: 'MOVE_DRAG',
-              clientX: moveEvent.clientX,
-              clientY: moveEvent.clientY,
-              bypassSnap: moveEvent.metaKey || moveEvent.altKey || moveEvent.shiftKey,
+              clientX: latestMove.clientX,
+              clientY: latestMove.clientY,
+              bypassSnap: latestMove.bypassSnap,
             });
           };
 
-          const handleMouseUp = () => {
-            dispatch({ type: 'END_DRAG' });
+          const handleMouseMove = (moveEvent) => {
+            latestMove = {
+              clientX: moveEvent.clientX,
+              clientY: moveEvent.clientY,
+              bypassSnap: moveEvent.metaKey || moveEvent.altKey || moveEvent.shiftKey,
+            };
+            if (!rafId) {
+              rafId = window.requestAnimationFrame(flushMove);
+            }
+          };
+
+          const handleMouseUp = (upEvent) => {
+            if (rafId) {
+              window.cancelAnimationFrame(rafId);
+              rafId = null;
+            }
+            dispatch({
+              type: 'END_DRAG',
+              clientX: upEvent.clientX,
+              clientY: upEvent.clientY,
+            });
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
           };
@@ -912,11 +843,20 @@ export const render = (state, dispatch) => {
 
         const duration = currentStream?.duration || 0;
         const baseElapsed = currentStream?.elapsed || 0;
-        const timeSinceUpdate = (Date.now() - (currentStream?.clientReceivedAt || data?.clientReceivedAt || Date.now())) / 1000;
+        const clientReceivedAt = currentStream?.clientReceivedAt || data?.clientReceivedAt || Date.now();
+        const timeSinceUpdate = (Date.now() - clientReceivedAt) / 1000;
         const elapsed = (isPlaying && !isPaused && duration > 0)
           ? Math.min(duration, baseElapsed + Math.max(0, timeSinceUpdate))
           : baseElapsed;
         const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (elapsed / duration) * 100)) : 0;
+
+        activePlaybackMeta.set(instance.id, {
+          isPlaying,
+          isPaused,
+          duration,
+          baseElapsed,
+          clientReceivedAt,
+        });
 
         const title = isPlaying ? currentStream.title : (error ? 'Widget Error' : 'Nothing Playing');
         const artist = isPlaying ? (currentStream.artist || 'Unknown Artist') : (error ? error : 'Playback Idle');
@@ -925,12 +865,13 @@ export const render = (state, dispatch) => {
         const appIcon = currentStream.appIcon || data?.appIcon || '';
         const bundleId = currentStream.bundleId || '';
         const streamId = currentStream.id || '';
-        const supportsRating = currentStream.supportsRating ?? false;
 
         const positionStyle = {
-          position: 'absolute',
-          top: `${y}px`,
-          left: `${x}px`,
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          transform: `translate3d(${x}px, ${y}px, 0)`,
+          willChange: isDragging ? 'transform' : 'auto',
           zIndex: isDragging ? 9999 : getWidgetZIndex('nowplaying'),
           cursor: isDragging ? 'grabbing' : 'grab',
           userSelect: 'none',
@@ -950,373 +891,371 @@ export const render = (state, dispatch) => {
         const isLiked = currentRating === 'liked';
         const isDisliked = currentRating === 'disliked';
 
-  const handleControl = (action, e) => {
-    if (e && e.stopPropagation) e.stopPropagation();
-    if (!isPlaying) return;
-    if (action === 'togglePlayPause') {
-      dispatch({ type: 'OPTIMISTIC_TOGGLE_PLAY', streamIndex: activeStreamIndex });
-    } else if (action === 'next' || action === 'previous') {
-      dispatch({ type: 'TRACK_CHANGE_PENDING', streamIndex: activeStreamIndex });
-    }
-    const pyScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/media_control.py';
-    const pyScriptFallback = 'nowplaying.widget/media_control.py';
-    const escapedAction = JSON.stringify(action);
-    const escapedId = JSON.stringify(streamId || '');
-    const escapedApp = JSON.stringify(appName || '');
-    const escapedBundle = JSON.stringify(bundleId || '');
-    const escapedKey = JSON.stringify(trackKey || '');
-    run(
-      `python3 "${pyScript}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null || python3 "${pyScriptFallback}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null`,
-      () => {
-        const songScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/get_song.py';
-        const songScriptFallback = 'nowplaying.widget/get_song.py';
-        run(`python3 "${songScript}" 2>/dev/null || python3 "${songScriptFallback}" 2>/dev/null`, (err, output) => {
-          if (!err && output) {
-            dispatch({ type: 'UB/COMMAND_RAN', output });
+        const handleControl = (action, e) => {
+          if (e && e.stopPropagation) e.stopPropagation();
+          if (!isPlaying) return;
+          if (action === 'togglePlayPause') {
+            dispatch({ type: 'OPTIMISTIC_TOGGLE_PLAY', streamIndex: activeStreamIndex });
+          } else if (action === 'next' || action === 'previous') {
+            dispatch({ type: 'TRACK_CHANGE_PENDING', streamIndex: activeStreamIndex });
           }
-        });
-      }
-    );
-  };
+          const pyScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/media_control.py';
+          const pyScriptFallback = 'nowplaying.widget/media_control.py';
+          const escapedAction = JSON.stringify(action);
+          const escapedId = JSON.stringify(streamId || '');
+          const escapedApp = JSON.stringify(appName || '');
+          const escapedBundle = JSON.stringify(bundleId || '');
+          const escapedKey = JSON.stringify(trackKey || '');
+          run(
+            `python3 "${pyScript}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null || python3 "${pyScriptFallback}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null`,
+            () => {
+              const songScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/get_song.py';
+              const songScriptFallback = 'nowplaying.widget/get_song.py';
+              run(`python3 "${songScript}" 2>/dev/null || python3 "${songScriptFallback}" 2>/dev/null`, (err, output) => {
+                if (!err && output) {
+                  dispatch({ type: 'UB/COMMAND_RAN', output });
+                }
+              });
+            }
+          );
+        };
 
-  const handleRating = (action, e) => {
-    if (e && e.stopPropagation) e.stopPropagation();
-    if (!isPlaying) return;
+        const handleRating = (action, e) => {
+          if (e && e.stopPropagation) e.stopPropagation();
+          if (!isPlaying) return;
 
-    // Do NOT optimistically set the color!
-    // Execute media_control.py. Only if the stream supports rating and succeeds, update state.
-    const pyScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/media_control.py';
-    const pyScriptFallback = 'nowplaying.widget/media_control.py';
-    const escapedAction = JSON.stringify(action);
-    const escapedId = JSON.stringify(streamId || '');
-    const escapedApp = JSON.stringify(appName || '');
-    const escapedBundle = JSON.stringify(bundleId || '');
-    const escapedKey = JSON.stringify(trackKey || '');
+          const pyScript = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/media_control.py';
+          const pyScriptFallback = 'nowplaying.widget/media_control.py';
+          const escapedAction = JSON.stringify(action);
+          const escapedId = JSON.stringify(streamId || '');
+          const escapedApp = JSON.stringify(appName || '');
+          const escapedBundle = JSON.stringify(bundleId || '');
+          const escapedKey = JSON.stringify(trackKey || '');
 
-    run(
-      `python3 "${pyScript}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null || python3 "${pyScriptFallback}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null`,
-      (err, output) => {
-        if (err || !output) return;
-        try {
-          const res = JSON.parse(output.trim());
-          if (res && res.success) {
-            const nextRating = res.rating === 'none' ? null : res.rating;
-            dispatch({ type: 'SET_RATING', trackKey, rating: nextRating, streamId });
-          }
-        } catch (e) {}
-      }
-    );
-  };
+          run(
+            `python3 "${pyScript}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null || python3 "${pyScriptFallback}" ${escapedAction} ${escapedId} ${escapedApp} ${escapedBundle} ${escapedKey} 2>/dev/null`,
+            (err, output) => {
+              if (err || !output) return;
+              try {
+                const res = JSON.parse(output.trim());
+                if (res && res.success) {
+                  const nextRating = res.rating === 'none' ? null : res.rating;
+                  dispatch({ type: 'SET_RATING', trackKey, rating: nextRating, streamId });
+                }
+              } catch (e) {}
+            }
+          );
+        };
 
-  const handleContextMenu = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const streamList = (streams || []).map((s, idx) => ({
-      index: idx,
-      title: s.title || '',
-      artist: s.artist || '',
-      appName: s.appName || '',
-      isActive: idx === activeStreamIndex,
-    }));
-
-    const payload = JSON.stringify({
-      instanceId: instance.id,
-      sizePreset: sizePreset || 'medium',
-      enableSnapping: enableSnapping !== false,
-      isPlaying: Boolean(isPlaying),
-      isPaused: Boolean(isPaused),
-      title: title || '',
-      artist: artist || '',
-      appName: appName || '',
-      streams: streamList,
-      screenId: currentScreenId,
-      x: Math.round(x),
-      y: Math.round(y),
-    });
-
-    const helperPath = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/menu_helper';
-    const fallbackPath = './nowplaying.widget/menu_helper';
-    const escapedPayload = payload.replace(/'/g, "'\\''");
-    const cmd = `"${helperPath}" '${escapedPayload}' 2>/dev/null || "${fallbackPath}" '${escapedPayload}' 2>/dev/null`;
-
-    run(cmd, (err, output) => {
-      if (err || !output) return;
-      try {
-        const res = JSON.parse(output.trim());
-        if (!res || !res.action) return;
-
-        if (res.action === 'SET_SIZE_PRESET') {
-          dispatch({ type: 'SET_SIZE_PRESET', instanceId: res.instanceId || instance.id, preset: res.preset });
-        } else if (res.action === 'TOGGLE_SNAPPING') {
-          dispatch({ type: 'TOGGLE_SNAPPING' });
-        } else if (res.action === 'RESET_POSITION') {
-          dispatch({ type: 'RESET_POSITION', instanceId: res.instanceId || instance.id });
-        } else if (res.action === 'RELOAD_WIDGET') {
-          const wid = res.widgetId || 'nowplaying-widget-index-jsx';
-          run(`osascript -e 'tell application id "tracesOf.Uebersicht" to reload widget id "${wid}"' 2>/dev/null || osascript -e 'tell application id "tracesOf.Uebersicht" to refresh'`);
-        } else if (res.action === 'REMOVE_WIDGET') {
-          dispatch({ type: 'REMOVE_WIDGET', instanceId: res.instanceId || instance.id, widgetId: res.widgetId || 'nowplaying-widget-index-jsx' });
-        } else if (res.action === 'DUPLICATE_WIDGET') {
-          dispatch({ type: 'DUPLICATE_WIDGET', instanceId: res.instanceId || instance.id });
-        } else if (res.action === 'SET_STREAM_INDEX') {
-          dispatch({ type: 'SET_STREAM_INDEX', instanceId: res.instanceId || instance.id, index: res.index });
-        } else if (res.action === 'MOVE_TO_SCREEN') {
-          dispatch({ type: 'MOVE_TO_SCREEN', screenId: res.screenId, instanceId: res.instanceId || instance.id });
-        } else if (res.action === 'ORDER_FRONT' || res.action === 'ORDER_FORWARD' || res.action === 'ORDER_BACKWARD' || res.action === 'ORDER_BACK') {
-          reorderWidget('nowplaying', res.action);
-          dispatch({ type: 'ORDER_CHANGED' });
-        }
-      } catch (parseErr) {}
-    });
-  };
-
-  const renderAppIcon = (name, iconUrl, size = 16) => {
-    if (!name && !iconUrl) return null;
-
-    let iconContent = null;
-    if (iconUrl) {
-      iconContent = (
-        <img
-          src={iconUrl}
-          alt={name || 'App'}
-          width={size}
-          height={size}
-          draggable={false}
-          style={{
-            width: `${size}px`,
-            height: `${size}px`,
-            objectFit: 'contain',
-            display: 'block',
-            userSelect: 'none',
-            WebkitUserSelect: 'none',
-            WebkitUserDrag: 'none',
-            pointerEvents: 'none',
-          }}
-        />
-      );
-    } else {
-      const lower = (name || '').toLowerCase();
-      if (lower.includes('youtube') || lower.includes('ytmusic')) {
-        iconContent = (
-          <svg width={size} height={size} viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="11" fill="#ea6962" />
-            <circle cx="12" cy="12" r="6.2" fill="none" stroke="#FFFFFF" strokeWidth="1.8" />
-            <polygon points="10.5,9.2 15,12 10.5,14.8" fill="#FFFFFF" />
-          </svg>
-        );
-      } else if (lower.includes('spotify')) {
-        iconContent = (
-          <svg width={size} height={size} viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="11" fill="#78b856" />
-            <path d="M7 9.5c3.2-.6 6.8-.4 10 1.1M7.8 12.4c2.8-.5 5.8-.3 8.2 1M8.5 15.2c2.4-.4 4.8-.2 6.8.8" stroke="#18181c" strokeWidth="1.9" strokeLinecap="round" fill="none" />
-          </svg>
-        );
-      } else if (lower.includes('apple') || lower === 'music') {
-        iconContent = (
-          <svg width={size} height={size} viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="11" fill="#fa586a" />
-            <path d="M11.5 6.5v8.2c-.4-.2-.9-.3-1.5-.3-1.6 0-3 1.2-3 2.7s1.4 2.7 3 2.7 3-1.2 3-2.7V9.5h3.5v-3h-5z" fill="#FFFFFF" />
-          </svg>
-        );
-      } else if (lower.includes('firefox')) {
-        iconContent = (
-          <svg width={size} height={size} viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="11" fill="#e66000" />
-            <path d="M12 4.5a7.5 7.5 0 0 0-7.5 7.5c0 4.1 3.4 7.5 7.5 7.5 3.8 0 6.9-2.8 7.4-6.6-.4.5-.8.8-1.3 1.1-1.4.8-3 .4-3.9-.8-.7-.8-.8-1.9-.3-2.7.4-.7.9-1 1.7-1.2-.8-.3-1.5-.3-2.2 0-1.1.5-1.9 1.6-1.9 2.8 0 .7.3 1.3.7 1.8-1.4-.4-2.4-1.6-2.4-3 0-1 .5-2.1 1.3-2.6.5-.4 1-.6 1.6-.7-.8-.8-1.1-1.7-1.1-2.7 0-.2 0-.5.1-.7.7-.9 1.6-1.6 2.5-1.9z" fill="#ffcb00" />
-          </svg>
-        );
-      } else if (lower.includes('safari')) {
-        iconContent = (
-          <svg width={size} height={size} viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="11" fill="#0066cc" />
-            <polygon points="15 8.5 12.8 12.8 8.5 15 10.8 10.8" fill="#FFFFFF" />
-            <polygon points="8.5 15 12.8 12.8 10.8 10.8" fill="#ea6962" />
-          </svg>
-        );
-      } else if (lower.includes('chrome')) {
-        iconContent = (
-          <svg width={size} height={size} viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="11" fill="#fbb829" />
-            <circle cx="12" cy="12" r="5" fill="#FFFFFF" />
-            <circle cx="12" cy="12" r="3.6" fill="#4285f4" />
-          </svg>
-        );
-      } else {
-        iconContent = (
-          <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="11" fill="rgba(255, 255, 255, 0.16)" />
-            <path d="M9 16V7l8-1.5v9" stroke="rgba(255,255,255,0.9)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            <circle cx="7.5" cy="16" r="2" fill="rgba(255,255,255,0.9)" />
-            <circle cx="15.5" cy="14.5" r="2" fill="rgba(255,255,255,0.9)" />
-          </svg>
-        );
-      }
-    }
-
-    return (
-      <div
-        title={name}
-        data-interactive="true"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: size <= 14 ? '2px' : '3px',
-          borderRadius: '7px',
-          backgroundColor: 'rgba(255, 255, 255, 0.08)',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-          boxShadow: '0 2px 6px rgba(0, 0, 0, 0.3)',
-          cursor: 'default',
-          userSelect: 'none',
-          WebkitUserSelect: 'none',
-        }}
-        onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        {iconContent}
-      </div>
-    );
-  };
-
-  const renderStreamChevron = (direction, customStyle = {}, iconSize = 10) => {
-    const hasMultiple = streams && streams.length > 1;
-    const isLeft = direction === 'left';
-    const nextIdx = isLeft
-      ? (activeStreamIndex - 1 + streams.length) % streams.length
-      : (activeStreamIndex + 1) % streams.length;
-
-    return (
-      <button
-        data-interactive="true"
-        style={{
-          ...controlBtnStyle,
-          width: '22px',
-          height: '22px',
-          background: hasMultiple ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
-          border: hasMultiple ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid transparent',
-          color: hasMultiple ? 'rgba(255, 255, 255, 0.75)' : 'rgba(255, 255, 255, 0.2)',
-          cursor: hasMultiple ? 'pointer' : 'default',
-          opacity: hasMultiple ? 1 : 0.3,
-          padding: 0,
-          ...customStyle,
-        }}
-        onClick={(e) => {
+        const handleContextMenu = (e) => {
+          e.preventDefault();
           e.stopPropagation();
-          if (!hasMultiple) return;
-          dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-        title={hasMultiple ? `${isLeft ? 'Previous' : 'Next'} stream (${nextIdx + 1}/${streams.length})` : 'Single stream active'}
-      >
-        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points={isLeft ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} />
-        </svg>
-      </button>
-    );
-  };
 
-  const renderStreamDots = (customStyle = {}) => {
-    if (!streams || streams.length <= 1) return null;
+          const streamList = (streams || []).map((s, idx) => ({
+            index: idx,
+            title: s.title || '',
+            artist: s.artist || '',
+            appName: s.appName || '',
+            isActive: idx === activeStreamIndex,
+          }));
 
-    return (
-      <div
-        data-interactive="true"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '4px',
-          width: '100%',
-          userSelect: 'none',
-          WebkitUserSelect: 'none',
-          margin: '2px 0 0 0',
-          ...customStyle,
-        }}
-        onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        {streams.map((s, idx) => {
-          const isActive = idx === activeStreamIndex;
+          const payload = JSON.stringify({
+            instanceId: instance.id,
+            sizePreset: sizePreset || 'medium',
+            enableSnapping: enableSnapping !== false,
+            isPlaying: Boolean(isPlaying),
+            isPaused: Boolean(isPaused),
+            title: title || '',
+            artist: artist || '',
+            appName: appName || '',
+            streams: streamList,
+            screenId: currentScreenId,
+            x: Math.round(x),
+            y: Math.round(y),
+          });
+
+          const helperPath = '$HOME/Library/Application Support/Übersicht/widgets/nowplaying.widget/menu_helper';
+          const fallbackPath = './nowplaying.widget/menu_helper';
+          const escapedPayload = payload.replace(/'/g, "'\\''");
+          const cmd = `"${helperPath}" '${escapedPayload}' 2>/dev/null || "${fallbackPath}" '${escapedPayload}' 2>/dev/null`;
+
+          run(cmd, (err, output) => {
+            if (err || !output) return;
+            try {
+              const res = JSON.parse(output.trim());
+              if (!res || !res.action) return;
+
+              if (res.action === 'SET_SIZE_PRESET') {
+                dispatch({ type: 'SET_SIZE_PRESET', instanceId: res.instanceId || instance.id, preset: res.preset });
+              } else if (res.action === 'TOGGLE_SNAPPING') {
+                dispatch({ type: 'TOGGLE_SNAPPING' });
+              } else if (res.action === 'RESET_POSITION') {
+                dispatch({ type: 'RESET_POSITION', instanceId: res.instanceId || instance.id });
+              } else if (res.action === 'RELOAD_WIDGET') {
+                const wid = res.widgetId || 'nowplaying-widget-index-jsx';
+                run(`osascript -e 'tell application id "tracesOf.Uebersicht" to reload widget id "${wid}"' 2>/dev/null || osascript -e 'tell application id "tracesOf.Uebersicht" to refresh'`);
+              } else if (res.action === 'REMOVE_WIDGET') {
+                dispatch({ type: 'REMOVE_WIDGET', instanceId: res.instanceId || instance.id, widgetId: res.widgetId || 'nowplaying-widget-index-jsx' });
+              } else if (res.action === 'DUPLICATE_WIDGET') {
+                dispatch({ type: 'DUPLICATE_WIDGET', instanceId: res.instanceId || instance.id });
+              } else if (res.action === 'SET_STREAM_INDEX') {
+                dispatch({ type: 'SET_STREAM_INDEX', instanceId: res.instanceId || instance.id, index: res.index });
+              } else if (res.action === 'MOVE_TO_SCREEN') {
+                dispatch({ type: 'MOVE_TO_SCREEN', screenId: res.screenId, instanceId: res.instanceId || instance.id });
+              } else if (res.action === 'ORDER_FRONT' || res.action === 'ORDER_FORWARD' || res.action === 'ORDER_BACKWARD' || res.action === 'ORDER_BACK') {
+                reorderWidget('nowplaying', res.action);
+                dispatch({ type: 'ORDER_CHANGED' });
+              }
+            } catch (parseErr) {}
+          });
+        };
+
+        const renderAppIcon = (name, iconUrl, size = 16) => {
+          if (!name && !iconUrl) return null;
+
+          let iconContent = null;
+          if (iconUrl) {
+            iconContent = (
+              <img
+                src={iconUrl}
+                alt={name || 'App'}
+                width={size}
+                height={size}
+                draggable={false}
+                style={{
+                  width: `${size}px`,
+                  height: `${size}px`,
+                  objectFit: 'contain',
+                  display: 'block',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  WebkitUserDrag: 'none',
+                  pointerEvents: 'none',
+                }}
+              />
+            );
+          } else {
+            const lower = (name || '').toLowerCase();
+            if (lower.includes('youtube') || lower.includes('ytmusic')) {
+              iconContent = (
+                <svg width={size} height={size} viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="11" fill="#ea6962" />
+                  <circle cx="12" cy="12" r="6.2" fill="none" stroke="#FFFFFF" strokeWidth="1.8" />
+                  <polygon points="10.5,9.2 15,12 10.5,14.8" fill="#FFFFFF" />
+                </svg>
+              );
+            } else if (lower.includes('spotify')) {
+              iconContent = (
+                <svg width={size} height={size} viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="11" fill="#78b856" />
+                  <path d="M7 9.5c3.2-.6 6.8-.4 10 1.1M7.8 12.4c2.8-.5 5.8-.3 8.2 1M8.5 15.2c2.4-.4 4.8-.2 6.8.8" stroke="#18181c" strokeWidth="1.9" strokeLinecap="round" fill="none" />
+                </svg>
+              );
+            } else if (lower.includes('apple') || lower === 'music') {
+              iconContent = (
+                <svg width={size} height={size} viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="11" fill="#fa586a" />
+                  <path d="M11.5 6.5v8.2c-.4-.2-.9-.3-1.5-.3-1.6 0-3 1.2-3 2.7s1.4 2.7 3 2.7 3-1.2 3-2.7V9.5h3.5v-3h-5z" fill="#FFFFFF" />
+                </svg>
+              );
+            } else if (lower.includes('firefox')) {
+              iconContent = (
+                <svg width={size} height={size} viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="11" fill="#e66000" />
+                  <path d="M12 4.5a7.5 7.5 0 0 0-7.5 7.5c0 4.1 3.4 7.5 7.5 7.5 3.8 0 6.9-2.8 7.4-6.6-.4.5-.8.8-1.3 1.1-1.4.8-3 .4-3.9-.8-.7-.8-.8-1.9-.3-2.7.4-.7.9-1 1.7-1.2-.8-.3-1.5-.3-2.2 0-1.1.5-1.9 1.6-1.9 2.8 0 .7.3 1.3.7 1.8-1.4-.4-2.4-1.6-2.4-3 0-1 .5-2.1 1.3-2.6.5-.4 1-.6 1.6-.7-.8-.8-1.1-1.7-1.1-2.7 0-.2 0-.5.1-.7.7-.9 1.6-1.6 2.5-1.9z" fill="#ffcb00" />
+                </svg>
+              );
+            } else if (lower.includes('safari')) {
+              iconContent = (
+                <svg width={size} height={size} viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="11" fill="#0066cc" />
+                  <polygon points="15 8.5 12.8 12.8 8.5 15 10.8 10.8" fill="#FFFFFF" />
+                  <polygon points="8.5 15 12.8 12.8 10.8 10.8" fill="#ea6962" />
+                </svg>
+              );
+            } else if (lower.includes('chrome')) {
+              iconContent = (
+                <svg width={size} height={size} viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="11" fill="#fbb829" />
+                  <circle cx="12" cy="12" r="5" fill="#FFFFFF" />
+                  <circle cx="12" cy="12" r="3.6" fill="#4285f4" />
+                </svg>
+              );
+            } else {
+              iconContent = (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="11" fill="rgba(255, 255, 255, 0.16)" />
+                  <path d="M9 16V7l8-1.5v9" stroke="rgba(255,255,255,0.9)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="7.5" cy="16" r="2" fill="rgba(255,255,255,0.9)" />
+                  <circle cx="15.5" cy="14.5" r="2" fill="rgba(255,255,255,0.9)" />
+                </svg>
+              );
+            }
+          }
+
           return (
             <div
-              key={s.id || idx}
+              title={name}
               data-interactive="true"
               style={{
-                width: isActive ? '12px' : '4px',
-                height: '4px',
-                borderRadius: '2px',
-                backgroundColor: isActive ? '#FFFFFF' : 'rgba(255, 255, 255, 0.3)',
-                cursor: 'pointer',
-                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: size <= 14 ? '2px' : '3px',
+                borderRadius: '7px',
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.3)',
+                cursor: 'default',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {iconContent}
+            </div>
+          );
+        };
+
+        const renderStreamChevron = (direction, customStyle = {}, iconSize = 10) => {
+          const hasMultiple = streams && streams.length > 1;
+          const isLeft = direction === 'left';
+          const nextIdx = isLeft
+            ? (activeStreamIndex - 1 + streams.length) % streams.length
+            : (activeStreamIndex + 1) % streams.length;
+
+          return (
+            <button
+              data-interactive="true"
+              style={{
+                ...controlBtnStyle,
+                width: '22px',
+                height: '22px',
+                background: hasMultiple ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+                border: hasMultiple ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid transparent',
+                color: hasMultiple ? 'rgba(255, 255, 255, 0.75)' : 'rgba(255, 255, 255, 0.2)',
+                cursor: hasMultiple ? 'pointer' : 'default',
+                opacity: hasMultiple ? 1 : 0.3,
+                padding: 0,
+                ...customStyle,
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                dispatch({ type: 'SET_STREAM_INDEX', index: idx });
+                if (!hasMultiple) return;
+                dispatch({ type: 'SET_STREAM_INDEX', index: nextIdx });
               }}
-              title={`${s.appName || 'Stream'} (${idx + 1}/${streams.length})`}
-            />
+              onMouseDown={(e) => e.stopPropagation()}
+              title={hasMultiple ? `${isLeft ? 'Previous' : 'Next'} stream (${nextIdx + 1}/${streams.length})` : 'Single stream active'}
+            >
+              <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points={isLeft ? '15 18 9 12 15 6' : '9 18 15 12 9 6'} />
+              </svg>
+            </button>
           );
-        })}
-      </div>
-    );
-  };
+        };
 
-  const renderLikeBtn = (customStyle = {}, iconSize = 14) => (
-    <button
-      data-interactive="true"
-      style={{
-        ...controlBtnStyle,
-        ...customStyle,
-        color: isLiked ? '#78b856' : 'rgba(255, 255, 255, 0.85)',
-        background: customStyle.background || 'rgba(255, 255, 255, 0.08)',
-        border: customStyle.border || '1px solid rgba(255, 255, 255, 0.1)',
-        boxShadow: 'none',
-        opacity: isPlaying ? 1 : 0.45,
-        cursor: isPlaying ? 'pointer' : 'default',
-      }}
-      onClick={(e) => handleRating('like', e)}
-      onMouseDown={(e) => e.stopPropagation()}
-      title={isLiked ? 'Unlike' : 'Like'}
-    >
-      <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="currentColor">
-        {isLiked ? (
-          <path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z" />
-        ) : (
-          <path d="M9 21h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.58 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2zM9 9l4.34-4.34L12 10h9v2l-3 7H9V9zM1 9h4v12H1z" />
-        )}
-      </svg>
-    </button>
-  );
+        const renderStreamDots = (customStyle = {}) => {
+          if (!streams || streams.length <= 1) return null;
 
-  const renderDislikeBtn = (customStyle = {}, iconSize = 14) => (
-    <button
-      data-interactive="true"
-      style={{
-        ...controlBtnStyle,
-        ...customStyle,
-        color: isDisliked ? '#d75444' : 'rgba(255, 255, 255, 0.85)',
-        background: customStyle.background || 'rgba(255, 255, 255, 0.08)',
-        border: customStyle.border || '1px solid rgba(255, 255, 255, 0.1)',
-        boxShadow: 'none',
-        opacity: isPlaying ? 1 : 0.45,
-        cursor: isPlaying ? 'pointer' : 'default',
-      }}
-      onClick={(e) => handleRating('dislike', e)}
-      onMouseDown={(e) => e.stopPropagation()}
-      title={isDisliked ? 'Remove Dislike' : 'Dislike'}
-    >
-      <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="currentColor">
-        {isDisliked ? (
-          <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.37-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z" />
-        ) : (
-          <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.37-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm0 12l-4.34 4.34L12 14H3v-2l3-7h9v10zm4-12h4v12h-4z" />
-        )}
-      </svg>
-    </button>
-  );
+          return (
+            <div
+              data-interactive="true"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '4px',
+                width: '100%',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                margin: '2px 0 0 0',
+                ...customStyle,
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {streams.map((s, idx) => {
+                const isActive = idx === activeStreamIndex;
+                return (
+                  <div
+                    key={s.id || idx}
+                    data-interactive="true"
+                    style={{
+                      width: isActive ? '12px' : '4px',
+                      height: '4px',
+                      borderRadius: '2px',
+                      backgroundColor: isActive ? '#FFFFFF' : 'rgba(255, 255, 255, 0.3)',
+                      cursor: 'pointer',
+                      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dispatch({ type: 'SET_STREAM_INDEX', index: idx });
+                    }}
+                    title={`${s.appName || 'Stream'} (${idx + 1}/${streams.length})`}
+                  />
+                );
+              })}
+            </div>
+          );
+        };
+
+        const renderLikeBtn = (customStyle = {}, iconSize = 14) => (
+          <button
+            data-interactive="true"
+            style={{
+              ...controlBtnStyle,
+              ...customStyle,
+              color: isLiked ? '#78b856' : 'rgba(255, 255, 255, 0.85)',
+              background: customStyle.background || 'rgba(255, 255, 255, 0.08)',
+              border: customStyle.border || '1px solid rgba(255, 255, 255, 0.1)',
+              boxShadow: 'none',
+              opacity: isPlaying ? 1 : 0.45,
+              cursor: isPlaying ? 'pointer' : 'default',
+            }}
+            onClick={(e) => handleRating('like', e)}
+            onMouseDown={(e) => e.stopPropagation()}
+            title={isLiked ? 'Unlike' : 'Like'}
+          >
+            <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="currentColor">
+              {isLiked ? (
+                <path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z" />
+              ) : (
+                <path d="M9 21h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.58 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2zM9 9l4.34-4.34L12 10h9v2l-3 7H9V9zM1 9h4v12H1z" />
+              )}
+            </svg>
+          </button>
+        );
+
+        const renderDislikeBtn = (customStyle = {}, iconSize = 14) => (
+          <button
+            data-interactive="true"
+            style={{
+              ...controlBtnStyle,
+              ...customStyle,
+              color: isDisliked ? '#d75444' : 'rgba(255, 255, 255, 0.85)',
+              background: customStyle.background || 'rgba(255, 255, 255, 0.08)',
+              border: customStyle.border || '1px solid rgba(255, 255, 255, 0.1)',
+              boxShadow: 'none',
+              opacity: isPlaying ? 1 : 0.45,
+              cursor: isPlaying ? 'pointer' : 'default',
+            }}
+            onClick={(e) => handleRating('dislike', e)}
+            onMouseDown={(e) => e.stopPropagation()}
+            title={isDisliked ? 'Remove Dislike' : 'Dislike'}
+          >
+            <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="currentColor">
+              {isDisliked ? (
+                <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.37-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z" />
+              ) : (
+                <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.37-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm0 12l-4.34 4.34L12 14H3v-2l3-7h9v10zm4-12h4v12h-4z" />
+              )}
+            </svg>
+          </button>
+        );
 
         return (
           <div
@@ -1325,379 +1264,364 @@ export const render = (state, dispatch) => {
             onMouseDown={handleMouseDown}
             onContextMenu={handleContextMenu}
           >
-        {sizePreset === 'small' ? (
-          /* ========================================= */
-          /* SMALL PRESET (~1:1 Aspect Ratio, 154x154) */
-          /* ========================================= */
-          <div style={smallCardStyle}>
-            {(appName || appIcon) && (
-              <div style={{ position: 'absolute', top: '9px', right: '9px', zIndex: 10 }}>
-                {renderAppIcon(appName, appIcon, 13)}
-              </div>
-            )}
-            {/* Artwork 56x56 */}
-            <div style={smallArtworkContainerStyle}>
-              <div style={artworkFallbackStyle}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
-                </svg>
-              </div>
-              {isPlaying && currentStream?.artwork && (
-                <img
-                  src={currentStream.artwork}
-                  alt=""
-                  style={artworkImageStyle}
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
-              )}
-            </div>
-
-            {/* Song Metadata */}
-            <div style={{ width: '100%', textAlign: 'center', overflow: 'hidden', margin: '2px 0' }}>
-              <div
-                style={{
-                  fontSize: '11px',
-                  fontWeight: '600',
-                  color: '#FFFFFF',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  lineHeight: '1.35',
-                  padding: '1px 0',
-                }}
-                title={title}
-              >
-                {title}
-              </div>
-              <div
-                style={{
-                  fontSize: '9.5px',
-                  fontWeight: '500',
-                  color: 'rgba(255, 255, 255, 0.65)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  lineHeight: '1.35',
-                  padding: '1px 0',
-                  marginTop: '1px',
-                }}
-                title={artist}
-              >
-                {artist}
-              </div>
-            </div>
-
-            {/* Mini Progress */}
-            <div style={{ width: '100%', height: '3px', borderRadius: '2px', backgroundColor: 'rgba(255, 255, 255, 0.15)', overflow: 'hidden' }}>
-              <div
-                style={{
-                  width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
-                  height: '100%',
-                  backgroundColor: 'rgba(255, 255, 255, 0.75)',
-                  borderRadius: '2px',
-                  transition: 'width 0.3s ease',
-                }}
-              />
-            </div>
-
-            {/* Mini Controls: Stream switching outer chevrons on both sides */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%' }}>
-              {renderStreamChevron('left', { ...smallControlBtnStyle, width: '20px', height: '20px' }, 9)}
-              <button
-                data-interactive="true"
-                style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
-                onClick={(e) => handleControl('previous', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title="Previous Track"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-                </svg>
-              </button>
-              <button
-                data-interactive="true"
-                style={{ ...smallPlayPauseBtnStyle, width: '26px', height: '26px' }}
-                onClick={(e) => handleControl('togglePlayPause', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title={isPlaying && !isPaused ? 'Pause' : 'Play'}
-              >
-                {isPlaying && !isPaused ? (
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="#000000">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                  </svg>
-                ) : (
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="#000000">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
+            {sizePreset === 'small' ? (
+              /* SMALL PRESET (154x154) */
+              <div style={smallCardStyle}>
+                {(appName || appIcon) && (
+                  <div style={{ position: 'absolute', top: '9px', right: '9px', zIndex: 10 }}>
+                    {renderAppIcon(appName, appIcon, 13)}
+                  </div>
                 )}
-              </button>
-              <button
-                data-interactive="true"
-                style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
-                onClick={(e) => handleControl('next', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title="Next Track"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-                </svg>
-              </button>
-              {renderStreamChevron('right', { ...smallControlBtnStyle, width: '20px', height: '20px' }, 9)}
-            </div>
-            <div style={{ height: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {renderStreamDots({ margin: 0 })}
-            </div>
-          </div>
-        ) : sizePreset === 'large' ? (
-          /* ================================================= */
-          /* LARGE PRESET (Large Album Art 268x268, 300x~435) */
-          /* ================================================= */
-          <div style={largeCardStyle}>
-            {/* Big 268x268 Album Art */}
-            <div style={largeArtworkContainerStyle}>
-              <div style={{ ...artworkFallbackStyle, backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
-                </svg>
-              </div>
-              {isPlaying && currentStream?.artwork && (
-                <img
-                  src={currentStream.artwork}
-                  alt=""
-                  style={artworkImageStyle}
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
-              )}
-              {(appName || appIcon) && (
-                <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 5 }}>
-                  {renderAppIcon(appName, appIcon, 16)}
+                <div style={smallArtworkContainerStyle}>
+                  <div style={artworkFallbackStyle}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                      <circle cx="18" cy="16" r="3" />
+                    </svg>
+                  </div>
+                  {isPlaying && currentStream?.artwork && (
+                    <img
+                      src={currentStream.artwork}
+                      alt=""
+                      style={artworkImageStyle}
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  )}
                 </div>
-              )}
-            </div>
 
-            {/* Metadata */}
-            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div
-                style={{
-                  fontSize: '14.5px',
-                  fontWeight: '700',
-                  color: '#FFFFFF',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  letterSpacing: '-0.3px',
-                  lineHeight: '1.35',
-                  padding: '1px 0',
-                }}
-                title={title}
-              >
-                {title}
-              </div>
-              <div
-                style={{
-                  fontSize: '12px',
-                  fontWeight: '500',
-                  color: 'rgba(255, 255, 255, 0.72)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  lineHeight: '1.35',
-                  padding: '1px 0',
-                  marginTop: '1px',
-                }}
-                title={isPlaying && album && album !== title ? `${artist} • ${album}` : artist}
-              >
-                <span>{artist}</span>
-                {isPlaying && album && album !== title && (
-                  <span style={{ color: 'rgba(255, 255, 255, 0.45)', marginLeft: '5px' }}>
-                    • {album}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Progress Bar */}
-            <div style={{ ...progressSectionStyle, gap: '2px', padding: '0 2px' }}>
-              <div style={progressBarTrackStyle}>
-                <div
-                  style={{
-                    ...progressBarFillStyle,
-                    width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
-                  }}
-                />
-              </div>
-              <div style={{ ...progressTimesStyle, marginTop: '1px' }}>
-                <span>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
-                <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
-              </div>
-            </div>
-
-            {/* Large Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '-2px' }}>
-              {renderStreamChevron('left', { width: '24px', height: '24px' }, 11)}
-              {renderDislikeBtn({ width: '28px', height: '28px' }, 14)}
-              <button
-                data-interactive="true"
-                style={{ ...controlBtnStyle, width: '32px', height: '32px' }}
-                onClick={(e) => handleControl('previous', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title="Previous Track"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-                </svg>
-              </button>
-              <button
-                data-interactive="true"
-                style={{ ...playPauseBtnStyle, width: '36px', height: '36px' }}
-                onClick={(e) => handleControl('togglePlayPause', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title={isPlaying && !isPaused ? 'Pause' : 'Play'}
-              >
-                {isPlaying && !isPaused ? (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="#000000">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                  </svg>
-                ) : (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="#000000">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                )}
-              </button>
-              <button
-                data-interactive="true"
-                style={{ ...controlBtnStyle, width: '32px', height: '32px' }}
-                onClick={(e) => handleControl('next', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title="Next Track"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-                </svg>
-              </button>
-              {renderLikeBtn({ width: '28px', height: '28px' }, 14)}
-              {renderStreamChevron('right', { width: '24px', height: '24px' }, 11)}
-            </div>
-            {renderStreamDots({ margin: '2px auto 0 auto' })}
-          </div>
-        ) : (
-          /* =================================== */
-          /* MEDIUM PRESET (Standard Card, 300x154) */
-          /* =================================== */
-          <div style={cardStyle}>
-            {(appName || appIcon) && (
-              <div style={{ position: 'absolute', top: '12px', right: '14px', zIndex: 10 }}>
-                {renderAppIcon(appName, appIcon, 16)}
-              </div>
-            )}
-            {/* Top Section: Artwork + Info */}
-            <div style={topRowStyle}>
-              <div style={artworkContainerStyle}>
-                <div style={artworkFallbackStyle}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 18V5l12-2v13" />
-                    <circle cx="6" cy="18" r="3" />
-                    <circle cx="18" cy="16" r="3" />
-                  </svg>
+                <div style={{ width: '100%', textAlign: 'center', overflow: 'hidden', margin: '2px 0' }}>
+                  <div
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      color: '#FFFFFF',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      lineHeight: '1.35',
+                      padding: '1px 0',
+                    }}
+                    title={title}
+                  >
+                    {title}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '9.5px',
+                      fontWeight: '500',
+                      color: 'rgba(255, 255, 255, 0.65)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      lineHeight: '1.35',
+                      padding: '1px 0',
+                      marginTop: '1px',
+                    }}
+                    title={artist}
+                  >
+                    {artist}
+                  </div>
                 </div>
-                {isPlaying && currentStream?.artwork && (
-                  <img
-                    src={currentStream.artwork}
-                    alt=""
-                    style={artworkImageStyle}
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+
+                <div style={{ width: '100%', height: '3px', borderRadius: '2px', backgroundColor: 'rgba(255, 255, 255, 0.15)', overflow: 'hidden' }}>
+                  <div
+                    data-np-fill={instance.id}
+                    style={{
+                      width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
+                      height: '100%',
+                      backgroundColor: 'rgba(255, 255, 255, 0.75)',
+                      borderRadius: '2px',
+                    }}
                   />
-                )}
-              </div>
-
-              <div style={metaContainerStyle}>
-                <div style={titleStyle} title={title}>
-                  {title}
                 </div>
-                <div style={artistStyle} title={artist}>
-                  {artist}
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%' }}>
+                  {renderStreamChevron('left', { ...smallControlBtnStyle, width: '20px', height: '20px' }, 9)}
+                  <button
+                    data-interactive="true"
+                    style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
+                    onClick={(e) => handleControl('previous', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Previous Track"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                    </svg>
+                  </button>
+                  <button
+                    data-interactive="true"
+                    style={{ ...smallPlayPauseBtnStyle, width: '26px', height: '26px' }}
+                    onClick={(e) => handleControl('togglePlayPause', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title={isPlaying && !isPaused ? 'Pause' : 'Play'}
+                  >
+                    {isPlaying && !isPaused ? (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="#000000">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                      </svg>
+                    ) : (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="#000000">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    data-interactive="true"
+                    style={{ ...smallControlBtnStyle, width: '22px', height: '22px' }}
+                    onClick={(e) => handleControl('next', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Next Track"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                    </svg>
+                  </button>
+                  {renderStreamChevron('right', { ...smallControlBtnStyle, width: '20px', height: '20px' }, 9)}
                 </div>
-                {isPlaying && album && album !== title ? (
-                  <div style={albumStyle} title={album}>
-                    {album}
+                <div style={{ height: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {renderStreamDots({ margin: 0 })}
+                </div>
+              </div>
+            ) : sizePreset === 'large' ? (
+              /* LARGE PRESET (268x268 Art, 300x~435) */
+              <div style={largeCardStyle}>
+                <div style={largeArtworkContainerStyle}>
+                  <div style={{ ...artworkFallbackStyle, backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                      <circle cx="18" cy="16" r="3" />
+                    </svg>
                   </div>
-                ) : (
-                  <div style={{ ...albumStyle, opacity: 0.5 }}>
-                    {isPlaying ? '\u00A0' : (error ? 'Check connection' : 'No track active')}
+                  {isPlaying && currentStream?.artwork && (
+                    <img
+                      src={currentStream.artwork}
+                      alt=""
+                      style={artworkImageStyle}
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  )}
+                  {(appName || appIcon) && (
+                    <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 5 }}>
+                      {renderAppIcon(appName, appIcon, 16)}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      fontSize: '14.5px',
+                      fontWeight: '700',
+                      color: '#FFFFFF',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      letterSpacing: '-0.3px',
+                      lineHeight: '1.35',
+                      padding: '1px 0',
+                    }}
+                    title={title}
+                  >
+                    {title}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      color: 'rgba(255, 255, 255, 0.72)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      lineHeight: '1.35',
+                      padding: '1px 0',
+                      marginTop: '1px',
+                    }}
+                    title={isPlaying && album && album !== title ? `${artist} • ${album}` : artist}
+                  >
+                    <span>{artist}</span>
+                    {isPlaying && album && album !== title && (
+                      <span style={{ color: 'rgba(255, 255, 255, 0.45)', marginLeft: '5px' }}>
+                        • {album}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ ...progressSectionStyle, gap: '2px', padding: '0 2px' }}>
+                  <div style={progressBarTrackStyle}>
+                    <div
+                      data-np-fill={instance.id}
+                      style={{
+                        ...progressBarFillStyle,
+                        width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
+                      }}
+                    />
+                  </div>
+                  <div style={{ ...progressTimesStyle, marginTop: '1px' }}>
+                    <span data-np-elapsed={instance.id}>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
+                    <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '-2px' }}>
+                  {renderStreamChevron('left', { width: '24px', height: '24px' }, 11)}
+                  {renderDislikeBtn({ width: '28px', height: '28px' }, 14)}
+                  <button
+                    data-interactive="true"
+                    style={{ ...controlBtnStyle, width: '32px', height: '32px' }}
+                    onClick={(e) => handleControl('previous', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Previous Track"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                    </svg>
+                  </button>
+                  <button
+                    data-interactive="true"
+                    style={{ ...playPauseBtnStyle, width: '36px', height: '36px' }}
+                    onClick={(e) => handleControl('togglePlayPause', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title={isPlaying && !isPaused ? 'Pause' : 'Play'}
+                  >
+                    {isPlaying && !isPaused ? (
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="#000000">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                      </svg>
+                    ) : (
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="#000000">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    data-interactive="true"
+                    style={{ ...controlBtnStyle, width: '32px', height: '32px' }}
+                    onClick={(e) => handleControl('next', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Next Track"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                    </svg>
+                  </button>
+                  {renderLikeBtn({ width: '28px', height: '28px' }, 14)}
+                  {renderStreamChevron('right', { width: '24px', height: '24px' }, 11)}
+                </div>
+                {renderStreamDots({ margin: '2px auto 0 auto' })}
+              </div>
+            ) : (
+              /* MEDIUM PRESET (300x154) */
+              <div style={cardStyle}>
+                {(appName || appIcon) && (
+                  <div style={{ position: 'absolute', top: '12px', right: '14px', zIndex: 10 }}>
+                    {renderAppIcon(appName, appIcon, 16)}
                   </div>
                 )}
-              </div>
-            </div>
+                <div style={topRowStyle}>
+                  <div style={artworkContainerStyle}>
+                    <div style={artworkFallbackStyle}>
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 18V5l12-2v13" />
+                        <circle cx="6" cy="18" r="3" />
+                        <circle cx="18" cy="16" r="3" />
+                      </svg>
+                    </div>
+                    {isPlaying && currentStream?.artwork && (
+                      <img
+                        src={currentStream.artwork}
+                        alt=""
+                        style={artworkImageStyle}
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    )}
+                  </div>
 
-            {/* Middle Section: Progress Bar */}
-            <div style={progressSectionStyle}>
-              <div style={progressBarTrackStyle}>
-                <div
-                  style={{
-                    ...progressBarFillStyle,
-                    width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
-                  }}
-                />
-              </div>
-              <div style={progressTimesStyle}>
-                <span>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
-                <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
-              </div>
-            </div>
+                  <div style={metaContainerStyle}>
+                    <div style={titleStyle} title={title}>
+                      {title}
+                    </div>
+                    <div style={artistStyle} title={artist}>
+                      {artist}
+                    </div>
+                    {isPlaying && album && album !== title ? (
+                      <div style={albumStyle} title={album}>
+                        {album}
+                      </div>
+                    ) : (
+                      <div style={{ ...albumStyle, opacity: 0.5 }}>
+                        {isPlaying ? '\u00A0' : (error ? 'Check connection' : 'No track active')}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-            {/* Bottom Section: Media Controls */}
-            <div style={{ ...controlsRowStyle, gap: '8px', marginTop: '-4px' }}>
-              {renderStreamChevron('left', { width: '22px', height: '22px' }, 10)}
-              {renderDislikeBtn({ width: '26px', height: '26px' }, 13)}
-              <button
-                data-interactive="true"
-                style={{ ...controlBtnStyle, width: '28px', height: '28px' }}
-                onClick={(e) => handleControl('previous', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title="Previous Track"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-                </svg>
-              </button>
-              <button
-                data-interactive="true"
-                style={{ ...playPauseBtnStyle, width: '32px', height: '32px' }}
-                onClick={(e) => handleControl('togglePlayPause', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title={isPlaying && !isPaused ? 'Pause' : 'Play'}
-              >
-                {isPlaying && !isPaused ? (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#000000">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                  </svg>
-                ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#000000">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                )}
-              </button>
-              <button
-                data-interactive="true"
-                style={{ ...controlBtnStyle, width: '28px', height: '28px' }}
-                onClick={(e) => handleControl('next', e)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title="Next Track"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-                </svg>
-              </button>
-              {renderLikeBtn({ width: '26px', height: '26px' }, 13)}
-              {renderStreamChevron('right', { width: '22px', height: '22px' }, 10)}
-            </div>
-            {renderStreamDots({ margin: '-2px auto 0 auto' })}
-          </div>
-        )}
+                <div style={progressSectionStyle}>
+                  <div style={progressBarTrackStyle}>
+                    <div
+                      data-np-fill={instance.id}
+                      style={{
+                        ...progressBarFillStyle,
+                        width: isPlaying && duration > 0 ? `${progressPercent}%` : '0%',
+                      }}
+                    />
+                  </div>
+                  <div style={progressTimesStyle}>
+                    <span data-np-elapsed={instance.id}>{isPlaying ? formatTime(elapsed) : '0:00'}</span>
+                    <span>{isPlaying && duration > 0 ? formatTime(duration) : '0:00'}</span>
+                  </div>
+                </div>
+
+                <div style={{ ...controlsRowStyle, gap: '8px', marginTop: '-4px' }}>
+                  {renderStreamChevron('left', { width: '22px', height: '22px' }, 10)}
+                  {renderDislikeBtn({ width: '26px', height: '26px' }, 13)}
+                  <button
+                    data-interactive="true"
+                    style={{ ...controlBtnStyle, width: '28px', height: '28px' }}
+                    onClick={(e) => handleControl('previous', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Previous Track"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                    </svg>
+                  </button>
+                  <button
+                    data-interactive="true"
+                    style={{ ...playPauseBtnStyle, width: '32px', height: '32px' }}
+                    onClick={(e) => handleControl('togglePlayPause', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title={isPlaying && !isPaused ? 'Pause' : 'Play'}
+                  >
+                    {isPlaying && !isPaused ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="#000000">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="#000000">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    data-interactive="true"
+                    style={{ ...controlBtnStyle, width: '28px', height: '28px' }}
+                    onClick={(e) => handleControl('next', e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Next Track"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                    </svg>
+                  </button>
+                  {renderLikeBtn({ width: '26px', height: '26px' }, 13)}
+                  {renderStreamChevron('right', { width: '22px', height: '22px' }, 10)}
+                </div>
+                {renderStreamDots({ margin: '-2px auto 0 auto' })}
+              </div>
+            )}
           </div>
         );
       })}
@@ -1938,7 +1862,6 @@ const progressBarFillStyle = {
   height: '100%',
   backgroundColor: 'rgba(255, 255, 255, 0.75)',
   borderRadius: '2px',
-  transition: 'width 0.3s ease',
 };
 
 const progressTimesStyle = {

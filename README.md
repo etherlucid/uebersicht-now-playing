@@ -55,3 +55,4 @@ Queries macOS MediaRemote directly via `nowplaying-cli`, displaying playback met
 
 - [uebersicht-cava](https://github.com/etherlucid/uebersicht-cava): Responsive desktop audio visualizer for CAVA.
 - [uebersicht-shell](https://github.com/etherlucid/uebersicht-shell): Interactive desktop terminal & fastfetch widget.
+- [uebersicht-sticker](https://github.com/etherlucid/uebersicht-sticker): Animated desktop sticker manager & Vision AI cutout studio.

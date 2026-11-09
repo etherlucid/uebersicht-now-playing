@@ -11,15 +11,21 @@ import re
 import urllib.request
 import urllib.parse
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WIDGET_CACHE_DIR = os.path.join(SCRIPT_DIR, ".cache")
+
 CACHE_TRACK_FILE = "/tmp/nowplaying_track.txt"
 CACHE_ART_FILE = "/tmp/nowplaying_art_data.txt"
 CACHE_STATE_FILE = "/tmp/nowplaying_state.json"
-CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache.json"
+CACHE_STREAMS_FILE = "/tmp/nowplaying_streams_cache_v3.json"
 CACHE_RATINGS_FILE = "/tmp/nowplaying_ratings.json"
-CACHE_ART_DIR = "/tmp/nowplaying_art_cache_v2"
+CACHE_ART_META_DIR = "/tmp/nowplaying_art_meta_v3"
 CACHE_YTMUSIC_ART_FILE = "/tmp/nowplaying_ytmusic_art.txt"
-CACHE_APP_ICON_DIR = "/tmp/nowplaying_app_icons"
-CACHE_APP_ICON_SCRIPT = "/tmp/nowplaying_get_app_icon.js"
+CACHE_APP_ICON_DIR = "/tmp/nowplaying_app_icons_v3"
+CACHE_APP_ICON_SCRIPT = "/tmp/nowplaying_get_app_icon_v3.js"
+CACHE_BG_PLAYERS_FILE = "/tmp/nowplaying_bg_players.json"
+CACHE_BG_PLAYERS_LOCK = "/tmp/nowplaying_bg_players.lock"
+CACHE_FETCH_LOCK_DIR = "/tmp/nowplaying_fetch_locks"
 
 _APP_ICON_MEM_CACHE = {}
 
@@ -28,6 +34,7 @@ JXA_APP_ICON_SCRIPT_CODE = '''ObjC.import("AppKit");
 function run(argv) {
     var bundleId = argv[0] || "";
     var appName = argv[1] || "";
+    var outPath = argv[2] || "";
 
     var ws = $.NSWorkspace.sharedWorkspace;
     var fm = $.NSFileManager.defaultManager;
@@ -82,10 +89,10 @@ function run(argv) {
         }
     }
 
-    if (!appPath) return "";
+    if (!appPath) return "NONE";
 
     var icon = ws.iconForFile(appPath);
-    if (!icon) return "";
+    if (!icon) return "NONE";
 
     var size = 64;
     var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
@@ -103,11 +110,40 @@ function run(argv) {
     $.NSGraphicsContext.restoreGraphicsState;
 
     var pngData = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}));
-    if (!pngData) return "";
+    if (!pngData) return "NONE";
+    if (outPath) {
+        pngData.writeToFileAtomically(outPath, true);
+        return "SAVED";
+    }
     var b64 = pngData.base64EncodedStringWithOptions(0);
     return "data:image/png;base64," + ObjC.unwrap(b64);
 }
 '''
+
+def ensure_dirs():
+    for d in (WIDGET_CACHE_DIR, CACHE_ART_META_DIR, CACHE_APP_ICON_DIR, CACHE_FETCH_LOCK_DIR):
+        if not os.path.exists(d):
+            try:
+                os.makedirs(d, exist_ok=True)
+            except Exception:
+                pass
+
+def save_art_bytes_to_widget_cache(img_bytes, key_hash, ext="jpg"):
+    if not img_bytes:
+        return ""
+    ensure_dirs()
+    filename = f"art_{key_hash}.{ext}"
+    abs_path = os.path.join(WIDGET_CACHE_DIR, filename)
+    rel_url = f"nowplaying.widget/.cache/{filename}"
+    try:
+        if not os.path.exists(abs_path) or os.path.getsize(abs_path) != len(img_bytes):
+            tmp_path = f"{abs_path}.tmp.{os.getpid()}"
+            with open(tmp_path, "wb") as f:
+                f.write(img_bytes)
+            os.replace(tmp_path, abs_path)
+        return rel_url
+    except Exception:
+        return ""
 
 def get_app_icon(bundle_id, app_name):
     bundle_id = (bundle_id or "").strip()
@@ -115,29 +151,38 @@ def get_app_icon(bundle_id, app_name):
     if not bundle_id and not app_name:
         return ""
 
-    cache_key = f"{bundle_id}___{app_name}".lower()
+    lower_b = bundle_id.lower()
+    norm_b = "" if ("webkit" in lower_b or "mediaremote" in lower_b) else lower_b
+    cache_key = f"{norm_b}___{app_name.lower()}"
     if cache_key in _APP_ICON_MEM_CACHE:
         return _APP_ICON_MEM_CACHE[cache_key]
 
-    if not os.path.exists(CACHE_APP_ICON_DIR):
-        try:
-            os.makedirs(CACHE_APP_ICON_DIR, exist_ok=True)
-        except Exception:
-            pass
-
+    ensure_dirs()
     key_hash = hashlib.md5(cache_key.encode("utf-8", errors="ignore")).hexdigest()
-    cache_file = os.path.join(CACHE_APP_ICON_DIR, f"{key_hash}.txt")
-    if os.path.exists(cache_file):
+    meta_file = os.path.join(CACHE_APP_ICON_DIR, f"{key_hash}.txt")
+    icon_filename = f"icon_{key_hash}.png"
+    icon_abs_path = os.path.join(WIDGET_CACHE_DIR, icon_filename)
+    icon_rel_url = f"nowplaying.widget/.cache/{icon_filename}"
+
+    if os.path.exists(icon_abs_path) and os.path.getsize(icon_abs_path) > 0:
+        _APP_ICON_MEM_CACHE[cache_key] = icon_rel_url
+        return icon_rel_url
+
+    if os.path.exists(meta_file):
         try:
-            with open(cache_file, "r") as f:
-                cached_data = f.read().strip()
-                if cached_data:
-                    _APP_ICON_MEM_CACHE[cache_key] = cached_data
-                    return cached_data
+            # Negative cache ("NONE") expires after 1 hour
+            if (time.time() - os.path.getmtime(meta_file)) < 3600:
+                with open(meta_file, "r") as f:
+                    val = f.read().strip()
+                if val == "NONE":
+                    _APP_ICON_MEM_CACHE[cache_key] = ""
+                    return ""
+                elif val and os.path.exists(os.path.join(SCRIPT_DIR, "..", val)):
+                    _APP_ICON_MEM_CACHE[cache_key] = val
+                    return val
         except Exception:
             pass
 
-    # Ensure JXA script exists
     if not os.path.exists(CACHE_APP_ICON_SCRIPT):
         try:
             with open(CACHE_APP_ICON_SCRIPT, "w") as f:
@@ -147,50 +192,48 @@ def get_app_icon(bundle_id, app_name):
 
     try:
         proc = subprocess.run(
-            ["osascript", "-l", "JavaScript", CACHE_APP_ICON_SCRIPT, bundle_id, app_name],
+            ["osascript", "-l", "JavaScript", CACHE_APP_ICON_SCRIPT, bundle_id, app_name, icon_abs_path],
             capture_output=True,
             text=True,
-            timeout=1.5
+            timeout=1.2
         )
         out = proc.stdout.strip()
-        if out.startswith("data:image/png;base64,"):
+        if out == "SAVED" and os.path.exists(icon_abs_path):
             try:
-                with open(cache_file, "w") as f:
-                    f.write(out)
+                with open(meta_file, "w") as f:
+                    f.write(icon_rel_url)
             except Exception:
                 pass
-            _APP_ICON_MEM_CACHE[cache_key] = out
-            return out
+            _APP_ICON_MEM_CACHE[cache_key] = icon_rel_url
+            return icon_rel_url
     except Exception:
         pass
 
+    try:
+        with open(meta_file, "w") as f:
+            f.write("NONE")
+    except Exception:
+        pass
     _APP_ICON_MEM_CACHE[cache_key] = ""
     return ""
 
 def find_nowplaying_cli():
-    paths = [
-        "/opt/homebrew/bin/nowplaying-cli",
-        "/usr/local/bin/nowplaying-cli",
-    ]
-    for p in paths:
+    for p in ("/opt/homebrew/bin/nowplaying-cli", "/usr/local/bin/nowplaying-cli"):
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
     which_p = shutil.which("nowplaying-cli")
-    if which_p:
-        return which_p
-    return "/opt/homebrew/bin/nowplaying-cli"
+    return which_p or "/opt/homebrew/bin/nowplaying-cli"
 
 def get_nowplaying_data():
     cli = find_nowplaying_cli()
-    if not os.path.exists(cli) and not shutil.which(cli):
+    if not os.path.exists(cli):
         return None
-
     try:
         proc = subprocess.run(
             [cli, "get-raw"],
             capture_output=True,
             text=True,
-            timeout=1.5
+            timeout=0.8
         )
         stdout = proc.stdout.strip()
         if not stdout or stdout == "null":
@@ -199,33 +242,31 @@ def get_nowplaying_data():
     except Exception:
         return None
 
-def get_track_art_cache_path(track_key):
-    if not track_key:
+def get_meta_cache_path(key):
+    if not key:
         return ""
-    h = hashlib.md5(track_key.encode("utf-8", errors="ignore")).hexdigest()
-    return os.path.join(CACHE_ART_DIR, f"{h}.txt")
+    h = hashlib.md5(key.encode("utf-8", errors="ignore")).hexdigest()
+    return os.path.join(CACHE_ART_META_DIR, f"{h}.txt")
 
-def download_and_encode_image(url, timeout=2.0):
+def download_image_bytes(url, timeout=2.0):
     if not url:
-        return ""
+        return None, "jpg"
     try:
-        import urllib.request
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read()
             if not data:
-                return ""
-            b64 = base64.b64encode(data).decode("ascii")
-            mime = "image/jpeg"
+                return None, "jpg"
+            ext = "jpg"
             if data.startswith(b"\x89PNG"):
-                mime = "image/png"
+                ext = "png"
             elif data.startswith(b"GIF"):
-                mime = "image/gif"
+                ext = "gif"
             elif data.startswith(b"RIFF") and b"WEBP" in data[:16]:
-                mime = "image/webp"
-            return f"data:{mime};base64,{b64}"
+                ext = "webp"
+            return data, ext
     except Exception:
-        return ""
+        return None, "jpg"
 
 def clean_title_and_artist(artist, title):
     t = (title or "").strip()
@@ -247,9 +288,9 @@ def clean_title_and_artist(artist, title):
     primary_a = re.split(r'[,&•]|\s+(?:feat\.|ft\.|x|vs\.)\s+', a, flags=re.I)[0].strip()
     return primary_a, a, t
 
-def fetch_online_artwork(artist, title):
+def fetch_online_artwork_bytes(artist, title):
     if not title:
-        return ""
+        return None, "jpg"
 
     primary_a, clean_a, clean_t = clean_title_and_artist(artist, title)
 
@@ -278,26 +319,26 @@ def fetch_online_artwork(artist, title):
             seen.add(ql)
             uniq_queries.append(q)
 
-    # Tier 1: Deezer Search API (superb square 1000x1000 official album covers)
-    for q in uniq_queries:
+    # Tier 1: Deezer Search API (square 1000x1000 official album covers)
+    for q in uniq_queries[:3]:
         try:
             url = f"https://api.deezer.com/search?q={urllib.parse.quote(q)}&limit=1"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=1.8) as resp:
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 items = data.get("data", [])
                 if items:
                     album = items[0].get("album", {})
                     img_url = album.get("cover_xl") or album.get("cover_big")
                     if img_url:
-                        b64_data = download_and_encode_image(img_url, timeout=1.8)
-                        if b64_data:
-                            return b64_data
+                        img_bytes, ext = download_image_bytes(img_url, timeout=2.0)
+                        if img_bytes:
+                            return img_bytes, ext
         except Exception:
             pass
 
-    # Tier 2: iTunes Search API (high-res 600x600 square covers)
-    for q in uniq_queries:
+    # Tier 2: iTunes Search API (600x600 square covers)
+    for q in uniq_queries[:3]:
         try:
             url = "https://itunes.apple.com/search?" + urllib.parse.urlencode({
                 "term": q,
@@ -305,182 +346,195 @@ def fetch_online_artwork(artist, title):
                 "limit": "1"
             })
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=1.8) as resp:
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 results = data.get("results", [])
                 if results:
                     raw_url = results[0].get("artworkUrl100", "")
                     if raw_url:
                         high_res = raw_url.replace("100x100bb", "600x600bb").replace("100x100", "600x600")
-                        b64_data = download_and_encode_image(high_res, timeout=1.8)
-                        if b64_data:
-                            return b64_data
+                        img_bytes, ext = download_image_bytes(high_res, timeout=2.0)
+                        if img_bytes:
+                            return img_bytes, ext
         except Exception:
             pass
 
-    # Tier 3: YouTube Search fallback
+    # Tier 3: YouTube Search fallback (only if artist is known or YT Music)
+    if primary_a:
+        try:
+            url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(uniq_queries[0] if uniq_queries else title)}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+                vids = re.findall(r'\"videoId\":\"([a-zA-Z0-9_-]{11})\"', html)
+                if vids:
+                    thumb_url = f"https://i.ytimg.com/vi/{vids[0]}/hqdefault.jpg"
+                    img_bytes, ext = download_image_bytes(thumb_url, timeout=2.0)
+                    if img_bytes:
+                        return img_bytes, ext
+        except Exception:
+            pass
+
+    return None, "jpg"
+
+def spawn_background_art_fetch(artist, title, canonical_key):
+    ensure_dirs()
+    key_hash = hashlib.md5(canonical_key.encode("utf-8", errors="ignore")).hexdigest()
+    lock_file = os.path.join(CACHE_FETCH_LOCK_DIR, f"{key_hash}.lock")
+    if os.path.exists(lock_file):
+        try:
+            if (time.time() - os.path.getmtime(lock_file)) < 15:
+                return
+        except Exception:
+            pass
     try:
-        url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(uniq_queries[0] if uniq_queries else title)}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
-            vids = re.findall(r'\"videoId\":\"([a-zA-Z0-9_-]{11})\"', html)
-            if vids:
-                thumb_url = f"https://i.ytimg.com/vi/{vids[0]}/hqdefault.jpg"
-                b64_data = download_and_encode_image(thumb_url, timeout=2.0)
-                if b64_data:
-                    return b64_data
+        with open(lock_file, "w") as f:
+            f.write(str(os.getpid()))
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--fetch-art", artist or "", title or "", canonical_key],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True
+        )
     except Exception:
         pass
 
+def run_fetch_art_worker(artist, title, canonical_key):
+    ensure_dirs()
+    key_hash = hashlib.md5(canonical_key.encode("utf-8", errors="ignore")).hexdigest()
+    lock_file = os.path.join(CACHE_FETCH_LOCK_DIR, f"{key_hash}.lock")
+    official_meta = get_meta_cache_path(f"official___{canonical_key}")
+    track_meta = get_meta_cache_path(canonical_key)
+    no_art_file = get_meta_cache_path(f"no_art___{canonical_key}")
+
+    try:
+        img_bytes, ext = fetch_online_artwork_bytes(artist, title)
+        if img_bytes:
+            rel_url = save_art_bytes_to_widget_cache(img_bytes, f"off_{key_hash}", ext)
+            if rel_url:
+                with open(official_meta, "w") as f:
+                    f.write(rel_url)
+                with open(track_meta, "w") as f:
+                    f.write(rel_url)
+        else:
+            with open(no_art_file, "w") as f:
+                f.write("none")
+    except Exception:
+        pass
+    finally:
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception:
+            pass
+
+def read_cached_art_url(meta_path):
+    if not meta_path or not os.path.exists(meta_path):
+        return ""
+    try:
+        with open(meta_path, "r") as f:
+            rel_url = f.read().strip()
+        if rel_url and rel_url.startswith("nowplaying.widget/.cache/"):
+            fname = os.path.basename(rel_url)
+            if os.path.exists(os.path.join(WIDGET_CACHE_DIR, fname)):
+                return rel_url
+    except Exception:
+        pass
     return ""
 
 def process_artwork(data, track_key, artist="", title="", bundle_id="", app_name=""):
     if not track_key and not title:
         return ""
 
-    if not os.path.exists(CACHE_ART_DIR):
-        try:
-            os.makedirs(CACHE_ART_DIR, exist_ok=True)
-        except Exception:
-            pass
-
+    ensure_dirs()
     bundle_l = (bundle_id or (data.get("kMRMediaRemoteNowPlayingInfoClientBundleIdentifier") if data else "") or "").lower()
     app_l = (app_name or "").lower()
     is_yt = ("webapp" in bundle_l or "ytmusic" in bundle_l or "youtube" in app_l or "webkit" in bundle_l)
+    is_music_app = is_yt or any(k in bundle_l or k in app_l for k in ("music", "spotify", "itunes", "tidal", "deezer", "soundcloud"))
 
     pa, ca, ct = clean_title_and_artist(artist, title)
     canonical_key = f"{ct}___{ca}".lower() if ct else (track_key or "").lower()
+    key_hash = hashlib.md5(canonical_key.encode("utf-8", errors="ignore")).hexdigest()
 
-    official_cache_file = get_track_art_cache_path(f"official___{canonical_key}")
-    track_cache_file = get_track_art_cache_path(canonical_key)
+    official_meta = get_meta_cache_path(f"official___{canonical_key}")
+    track_meta = get_meta_cache_path(canonical_key)
+    no_art_file = get_meta_cache_path(f"no_art___{canonical_key}")
 
-    # 1. Fast path: return verified official album art if already cached
-    if os.path.exists(official_cache_file):
+    # 1. Fast path: verified official square album art already on disk
+    cached_official = read_cached_art_url(official_meta)
+    if cached_official:
+        return cached_official
+
+    # 2. Check if negative cache is fresh (5 minutes)
+    can_try_online = True
+    if os.path.exists(no_art_file):
         try:
-            with open(official_cache_file, "r") as f:
-                cached_art = f.read().strip()
-                if cached_art and cached_art.startswith("data:image/"):
-                    return cached_art
+            if (time.time() - os.path.getmtime(no_art_file)) < 300:
+                can_try_online = False
         except Exception:
             pass
 
-    # 2. For YouTube Music: Prioritize official square song album art over video thumbnails
-    # (Matches user requirement: always use song album art for music videos on YouTube Music,
-    # and keeps artwork intact when switching between music video and audio modes)
-    if is_yt and title:
-        no_art_file = get_track_art_cache_path(f"no_art___{canonical_key}")
-        should_fetch = True
-        if os.path.exists(no_art_file):
-            try:
-                if (time.time() - os.path.getmtime(no_art_file)) < 300:
-                    should_fetch = False
-            except Exception:
-                pass
+    # For YouTube Music, trigger non-blocking background fetch for square official album art
+    if is_yt and title and can_try_online:
+        spawn_background_art_fetch(artist, title, canonical_key)
 
-        if should_fetch:
-            online_art = fetch_online_artwork(artist, title)
-            if online_art and online_art.startswith("data:image/"):
-                try:
-                    with open(official_cache_file, "w") as f:
-                        f.write(online_art)
-                    with open(track_cache_file, "w") as f:
-                        f.write(online_art)
-                    with open(CACHE_ART_FILE, "w") as f:
-                        f.write(online_art)
-                    with open(CACHE_YTMUSIC_ART_FILE, "w") as f:
-                        f.write(online_art)
-                except Exception:
-                    pass
-                return online_art
-            else:
-                try:
-                    with open(no_art_file, "w") as f:
-                        f.write("none")
-                except Exception:
-                    pass
+    # 3. Fast path: check standard track cache file (MediaRemote decoded image or prior art)
+    cached_track = read_cached_art_url(track_meta)
+    if cached_track:
+        return cached_track
 
-    # 3. Fast path: check standard track cache file (for non-YT or if online was not found)
-    if track_cache_file and os.path.exists(track_cache_file):
-        try:
-            with open(track_cache_file, "r") as f:
-                cached_art = f.read().strip()
-                if cached_art and cached_art.startswith("data:image/"):
-                    return cached_art
-        except Exception:
-            pass
-
-    # 4. Process raw artwork from MediaRemote if present (used directly for Apple Music, Spotify, or fallback)
+    # 4. Decode raw artwork from MediaRemote if present (instant local decode, <15ms)
     raw_art = data.get("kMRMediaRemoteNowPlayingInfoArtworkData") if data else None
-    if raw_art and track_cache_file:
+    if raw_art:
         try:
             art_bytes = base64.b64decode(raw_art)
-            tmp_in = "/tmp/nowplaying_art.tiff"
-            tmp_out = "/tmp/nowplaying_art.jpg"
-            with open(tmp_in, "wb") as f:
-                f.write(art_bytes)
-
-            dims_proc = subprocess.run(
-                ["sips", "-1", "-g", "pixelWidth", "-g", "pixelHeight", tmp_in],
-                capture_output=True,
-                text=True,
-                timeout=1.0
-            )
-            w, h = 0, 0
-            if dims_proc.returncode == 0:
-                for chunk in dims_proc.stdout.split("|"):
-                    if "pixelWidth:" in chunk:
+            if art_bytes:
+                ext = "jpg"
+                if art_bytes.startswith(b"\x89PNG"):
+                    ext = "png"
+                elif art_bytes.startswith(b"RIFF") and b"WEBP" in art_bytes[:16]:
+                    ext = "webp"
+                elif art_bytes.startswith(b"II*\x00") or art_bytes.startswith(b"MM\x00*"):
+                    # Convert TIFF to JPEG via sips
+                    tmp_in = f"/tmp/np_art_{os.getpid()}.tiff"
+                    tmp_out = f"/tmp/np_art_{os.getpid()}.jpg"
+                    with open(tmp_in, "wb") as f:
+                        f.write(art_bytes)
+                    subprocess.run(
+                        ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "85", "-Z", "600", tmp_in, "--out", tmp_out],
+                        capture_output=True,
+                        timeout=0.8
+                    )
+                    if os.path.exists(tmp_out):
+                        with open(tmp_out, "rb") as f:
+                            art_bytes = f.read()
                         try:
-                            w = int(chunk.split(":")[1].strip())
+                            os.remove(tmp_in)
+                            os.remove(tmp_out)
                         except Exception:
                             pass
-                    elif "pixelHeight:" in chunk:
-                        try:
-                            h = int(chunk.split(":")[1].strip())
-                        except Exception:
-                            pass
-
-            max_dim = max(w, h)
-            cmd = ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "85"]
-            if max_dim > 800:
-                cmd.extend(["-Z", "800"])
-            cmd.extend([tmp_in, "--out", tmp_out])
-
-            subprocess.run(cmd, capture_output=True, timeout=1.2)
-
-            if os.path.exists(tmp_out):
-                with open(tmp_out, "rb") as f:
-                    b64_img = base64.b64encode(f.read()).decode("ascii")
-                artwork_data_url = f"data:image/jpeg;base64,{b64_img}"
-                with open(track_cache_file, "w") as f:
-                    f.write(artwork_data_url)
-                with open(CACHE_ART_FILE, "w") as f:
-                    f.write(artwork_data_url)
-                if is_yt:
-                    with open(CACHE_YTMUSIC_ART_FILE, "w") as f:
-                        f.write(artwork_data_url)
-                return artwork_data_url
+                rel_url = save_art_bytes_to_widget_cache(art_bytes, key_hash, ext)
+                if rel_url:
+                    try:
+                        with open(track_meta, "w") as f:
+                            f.write(rel_url)
+                    except Exception:
+                        pass
+                    return rel_url
         except Exception:
             pass
 
-    # 5. Non-YT online resolution fallback
-    if title:
-        online_art = fetch_online_artwork(artist, title)
-        if online_art and online_art.startswith("data:image/"):
-            try:
-                with open(track_cache_file, "w") as f:
-                    f.write(online_art)
-                with open(CACHE_ART_FILE, "w") as f:
-                    f.write(online_art)
-            except Exception:
-                pass
-            return online_art
+    # 5. Non-YT online resolution fallback (only for music apps or streams with an artist, in background)
+    if title and can_try_online and (is_music_app or bool(artist)):
+        spawn_background_art_fetch(artist, title, canonical_key)
 
     return ""
 
 def is_process_running(proc_name):
     try:
-        res = subprocess.run(["pgrep", "-x", proc_name], capture_output=True, timeout=0.5)
+        res = subprocess.run(["pgrep", "-x", proc_name], capture_output=True, timeout=0.3)
         return res.returncode == 0
     except Exception:
         return False
@@ -566,7 +620,7 @@ def calculate_progress(track_key, raw_elapsed, duration, playback_rate):
                     anchor_elapsed = saved_anchor_elapsed
                     anchor_time = now
                     last_raw_elapsed = raw_elapsed
-        else: # playback_rate == 1
+        else:
             if saved_rate == 0:
                 if abs(raw_elapsed - saved_raw_elapsed) > 0.5:
                     anchor_elapsed = raw_elapsed
@@ -608,57 +662,6 @@ def calculate_progress(track_key, raw_elapsed, duration, playback_rate):
         pass
 
     return current_elapsed
-
-def get_ytmusic_rating():
-    if not is_process_running("Web App"):
-        return None
-    script = '''
-tell application "System Events"
-  try
-    tell application process "Web App"
-      if (count of windows) is 0 then return "none"
-      tell window 1
-        set s to first UI element whose role is "AXSplitGroup"
-        set tb to first UI element of s whose role is "AXTabGroup"
-        set g1 to first UI element of tb whose role is "AXGroup"
-        set g2 to first UI element of g1 whose role is "AXGroup"
-        set sa to first UI element of g2 whose role is "AXScrollArea"
-        set wa to first UI element of sa whose role is "AXWebArea"
-        set pb to first UI element of wa whose description is "Player bar"
-        
-        set els to UI elements of pb
-        set c to count of els
-        repeat with i from 14 to c
-          set el to item i of els
-          if role of el is "AXCheckBox" then
-            set dlkVal to value of el as text
-            set lkVal to "0"
-            try
-              set lkVal to value of (first UI element of (item (i - 1) of els)) as text
-            end try
-            return (lkVal & "," & dlkVal)
-          end if
-        end repeat
-        return "none"
-      end tell
-    end tell
-  on error
-    return "none"
-  end try
-end tell
-'''
-    try:
-        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=2.5)
-        out = res.stdout.strip()
-        if out.startswith("1,"):
-            return "liked"
-        elif out.endswith(",1"):
-            return "disliked"
-        elif out == "0,0":
-            return None
-    except Exception:
-        pass
-    return None
 
 def get_ytmusic_direct_stream():
     if not is_process_running("Web App"):
@@ -716,16 +719,20 @@ tell application "System Events"
         
         set lk to "0"
         set dlk to "0"
-        repeat with i from 14 to c
-          set el to item i of els
-          if role of el is "AXCheckBox" then
-            set dlk to value of el as text
-            try
-              set lk to value of (first UI element of (item (i - 1) of els)) as text
-            end try
-            exit repeat
-          end if
-        end repeat
+        try
+          set els to UI elements of pb
+          set c to count of els
+          repeat with i from 14 to c
+            set el to item i of els
+            if role of el is "AXCheckBox" then
+              set dlk to value of el as text
+              try
+                set lk to value of (first UI element of (item (i - 1) of els)) as text
+              end try
+              exit repeat
+            end if
+          end repeat
+        end try
         
         return (t & "|||" & a & "|||" & tm & "|||" & pp & "|||" & lk & "|||" & dlk & "|||" & winTitle & "|||" & al)
       end tell
@@ -736,7 +743,7 @@ tell application "System Events"
 end tell
 '''
     try:
-        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.5)
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
         out = res.stdout.strip()
         if "|||" in out:
             parts = out.split("|||")
@@ -746,6 +753,7 @@ end tell
             pp_title = parts[3].strip() if len(parts) > 3 else "Play"
             lk_val = parts[4].strip() if len(parts) > 4 else "0"
             dlk_val = parts[5].strip() if len(parts) > 5 else "0"
+            album = parts[7].strip() if len(parts) > 7 else ""
 
             if not title:
                 win_title = parts[6].strip() if len(parts) > 6 else ""
@@ -770,7 +778,6 @@ end tell
             rate = 1 if pp_title.lower() == "pause" else 0
             rating = "liked" if lk_val == "1" else ("disliked" if dlk_val == "1" else None)
 
-            # Resolve artwork
             yt_art_key = f"{title}___{artist}___"
             artwork_url = process_artwork({}, yt_art_key, artist, title, "com.apple.Safari.WebApp.F5D92F4A-8F5E-4368-A535-047D3666F565", "YouTube Music")
 
@@ -778,7 +785,7 @@ end tell
                 "id": "ytmusic",
                 "title": title,
                 "artist": artist,
-                "album": "",
+                "album": album,
                 "duration": round(duration, 1),
                 "elapsed": round(elapsed, 1),
                 "rate": rate,
@@ -815,7 +822,7 @@ tell application "System Events"
 end tell
 '''
     try:
-        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.0)
         out = res.stdout.strip()
         if "|||" in out:
             parts = out.split("|||")
@@ -875,7 +882,7 @@ tell application "System Events"
 end tell
 '''
     try:
-        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.2)
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=1.0)
         out = res.stdout.strip()
         if "|||" in out:
             parts = out.split("|||")
@@ -907,6 +914,75 @@ end tell
         pass
     return None
 
+def run_poll_players_worker():
+    try:
+        result = {"ts": time.time(), "players": {}}
+        if is_process_running("Web App"):
+            yt = get_ytmusic_direct_stream()
+            if yt:
+                result["players"]["ytmusic"] = yt
+        if is_process_running("Music"):
+            am = get_apple_music_stream()
+            if am:
+                result["players"]["apple_music"] = am
+        if is_process_running("Spotify"):
+            sp = get_spotify_stream()
+            if sp:
+                result["players"]["spotify"] = sp
+        tmp_path = f"{CACHE_BG_PLAYERS_FILE}.tmp.{os.getpid()}"
+        with open(tmp_path, "w") as f:
+            json.dump(result, f)
+        os.replace(tmp_path, CACHE_BG_PLAYERS_FILE)
+    except Exception:
+        pass
+    finally:
+        try:
+            if os.path.exists(CACHE_BG_PLAYERS_LOCK):
+                os.remove(CACHE_BG_PLAYERS_LOCK)
+        except Exception:
+            pass
+
+def get_cached_bg_players():
+    now = time.time()
+    data = {}
+    need_refresh = True
+    if os.path.exists(CACHE_BG_PLAYERS_FILE):
+        try:
+            with open(CACHE_BG_PLAYERS_FILE, "r") as f:
+                parsed = json.load(f)
+            age = now - float(parsed.get("ts", 0))
+            if age < 15.0:
+                data = parsed.get("players", {})
+            if age < 3.0:
+                need_refresh = False
+        except Exception:
+            pass
+
+    if need_refresh:
+        lock_active = False
+        if os.path.exists(CACHE_BG_PLAYERS_LOCK):
+            try:
+                if (now - os.path.getmtime(CACHE_BG_PLAYERS_LOCK)) < 5.0:
+                    lock_active = True
+            except Exception:
+                pass
+        if not lock_active:
+            try:
+                with open(CACHE_BG_PLAYERS_LOCK, "w") as f:
+                    f.write(str(os.getpid()))
+                subprocess.Popen(
+                    [sys.executable, os.path.abspath(__file__), "--poll-players"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True,
+                    start_new_session=True
+                )
+            except Exception:
+                pass
+
+    return data
+
 def is_app_running(bundle_id, app_name):
     target = f"{bundle_id} {app_name}".lower()
     if "firefox" in target:
@@ -923,61 +999,35 @@ def is_app_running(bundle_id, app_name):
         return is_process_running("Safari")
     return True
 
-def get_audio_pids():
-    try:
-        res = subprocess.run(["pmset", "-g", "assertions"], capture_output=True, text=True, timeout=0.8)
-        pids = set()
-        for line in res.stdout.splitlines():
-            if "Created for PID:" in line:
-                pid = line.split("Created for PID:")[1].strip().rstrip(".")
-                if pid.isdigit():
-                    pids.add(int(pid))
-        return pids
-    except Exception:
-        return set()
-
-def is_proc_playing_audio(proc_name):
-    try:
-        res = subprocess.run(["pgrep", "-i", proc_name], capture_output=True, text=True, timeout=0.5)
-        pids = [int(p) for p in res.stdout.split() if p.isdigit()]
-        audio_pids = get_audio_pids()
-        return any(p in audio_pids for p in pids)
-    except Exception:
-        return False
-
 def is_dedicated_music_app(stream):
     app_name = (stream.get("appName") or "").lower()
     bundle_id = (stream.get("bundleId") or "").lower()
     stream_id = (stream.get("id") or "").lower()
-    music_keywords = ["youtube music", "ytmusic", "spotify", "apple music", "music", "itunes", "tidal", "deezer", "qobuz", "pandora", "soundcloud", "bandcamp"]
+    music_keywords = ("youtube music", "ytmusic", "spotify", "apple music", "music", "itunes", "tidal", "deezer", "qobuz", "pandora", "soundcloud", "bandcamp")
     for kw in music_keywords:
         if kw in app_name or kw in bundle_id or kw in stream_id:
             return True
     return False
 
 def stream_sort_key(s):
-    # 1. Playing apps first: rate == 1 gets top priority (weight 100)
     is_playing = 100 if s.get("rate") == 1 else 0
-
-    # 2. Actual music apps bias: dedicated music players get a +10 boost
-    # (keeps generic web browsers / HTML video tabs like Firefox/Chrome behind music players when both play)
     music_bias = 10 if is_dedicated_music_app(s) else 0
-
-    # 3. Rich metadata bonus: has artist or album art (+2)
     has_rich_meta = 2 if (s.get("artist") or s.get("artwork")) else 0
-
-    # 4. Recency timestamp as final tie-breaker
     recency = float(s.get("updatedAt", 0))
-
     return (is_playing, music_bias, has_rich_meta, recency)
 
 def main():
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--fetch-art" and len(sys.argv) >= 5:
+            run_fetch_art_worker(sys.argv[2], sys.argv[3], sys.argv[4])
+            return
+        elif sys.argv[1] == "--poll-players":
+            run_poll_players_worker()
+            return
+
     now = time.time()
     streams_map = {}
 
-    # Load recent cached streams (only dedicated music apps: YTMusic, Apple Music, Spotify)
-    # Generic browser streams (Firefox, Chrome, Safari) are NEVER kept from cache because when their
-    # media tab closes, they have no persistent session, cannot be controlled, and would hijack playback controls.
     if os.path.exists(CACHE_STREAMS_FILE):
         try:
             with open(CACHE_STREAMS_FILE, "r") as f:
@@ -990,9 +1040,10 @@ def main():
         except Exception:
             streams_map = {}
 
-    # 1. Primary MediaRemote NowPlaying query
+    # 1. Fast primary MediaRemote NowPlaying query (~35ms)
     mr_data = get_nowplaying_data()
     primary_stream = None
+    progress_track_key = ""
 
     if mr_data:
         title = mr_data.get("kMRMediaRemoteNowPlayingInfoTitle") or ""
@@ -1045,19 +1096,6 @@ def main():
             artwork_url = process_artwork(mr_data, art_track_key, artist, title, bundle_id, app_name)
             current_elapsed = calculate_progress(progress_track_key, raw_elapsed, duration, playback_rate)
 
-            # Rating determination
-            rating = None
-            if supports_rating:
-                if stream_id == "ytmusic":
-                    # Rating is fetched in get_ytmusic_direct_stream to avoid redundant JXA calls
-                    rating = None
-                elif stream_id == "apple_music":
-                    am_s = get_apple_music_stream()
-                    if am_s:
-                        rating = am_s.get("rating")
-            else:
-                rating = None
-
             primary_stream = {
                 "id": stream_id,
                 "title": title,
@@ -1069,118 +1107,68 @@ def main():
                 "artwork": artwork_url,
                 "bundleId": bundle_id,
                 "appName": app_name,
-                "rating": rating,
+                "rating": None,
                 "supportsRating": supports_rating,
                 "updatedAt": round(now, 3)
             }
             streams_map[stream_id] = primary_stream
 
-    # 2. Check YouTube Music if running
-    if is_process_running("Web App"):
-        yt_stream = get_ytmusic_direct_stream()
-        if yt_stream:
-            if "ytmusic" in streams_map:
-                existing = streams_map["ytmusic"]
-                if not yt_stream.get("artwork") and existing.get("artwork"):
-                    yt_stream["artwork"] = existing["artwork"]
-                elif yt_stream.get("artwork") and not existing.get("artwork"):
-                    existing["artwork"] = yt_stream["artwork"]
-                if existing.get("album"):
-                    yt_stream["album"] = existing["album"]
-                if existing.get("bundleId"):
-                    yt_stream["bundleId"] = existing["bundleId"]
-                if existing.get("artist") and existing.get("artist") != existing.get("title"):
-                    yt_stream["artist"] = existing["artist"]
-                streams_map["ytmusic"] = yt_stream
-                if primary_stream and primary_stream.get("id") == "ytmusic":
-                    primary_stream["elapsed"] = yt_stream["elapsed"]
-                    primary_stream["duration"] = yt_stream["duration"]
-                    primary_stream["rate"] = yt_stream["rate"]
-                    primary_stream["rating"] = yt_stream["rating"]
-                    if yt_stream.get("artwork"):
-                        primary_stream["artwork"] = yt_stream["artwork"]
-                    if yt_stream.get("title"):
-                        primary_stream["title"] = yt_stream["title"]
-                    if yt_stream.get("artist"):
-                        primary_stream["artist"] = yt_stream["artist"]
-                    new_state = {
-                        "track_id": progress_track_key,
-                        "anchor_elapsed": yt_stream["elapsed"],
-                        "anchor_time": now,
-                        "last_raw_elapsed": yt_stream["elapsed"],
-                        "last_rate": yt_stream["rate"],
-                        "last_updated": now
-                    }
-                    try:
-                        with open(CACHE_STATE_FILE, "w") as f:
-                            json.dump(new_state, f)
-                    except Exception:
-                        pass
-            else:
-                streams_map["ytmusic"] = yt_stream
+    # 2. Merge non-blocking background player state (YouTube Music, Apple Music, Spotify)
+    bg_players = get_cached_bg_players()
 
-    # 3. Check Apple Music if running
-    if is_process_running("Music"):
-        am_stream = get_apple_music_stream()
-        if am_stream:
-            if "apple_music" in streams_map:
-                existing = streams_map["apple_music"]
-                if not am_stream.get("artwork") and existing.get("artwork"):
-                    am_stream["artwork"] = existing["artwork"]
-                elif am_stream.get("artwork") and not existing.get("artwork"):
-                    existing["artwork"] = am_stream["artwork"]
-                streams_map["apple_music"] = am_stream
-                if primary_stream and primary_stream.get("id") == "apple_music":
-                    primary_stream["elapsed"] = am_stream["elapsed"]
-                    primary_stream["duration"] = am_stream["duration"]
-                    primary_stream["rate"] = am_stream["rate"]
-                    primary_stream["rating"] = am_stream["rating"]
-                    if am_stream.get("artwork"):
-                        primary_stream["artwork"] = am_stream["artwork"]
-            else:
-                streams_map["apple_music"] = am_stream
+    for pid, p_stream in bg_players.items():
+        if not p_stream or not p_stream.get("title"):
+            continue
+        if pid in streams_map:
+            existing = streams_map[pid]
+            if not p_stream.get("artwork") and existing.get("artwork"):
+                p_stream["artwork"] = existing["artwork"]
+            elif p_stream.get("artwork") and not existing.get("artwork"):
+                existing["artwork"] = p_stream["artwork"]
+            if existing.get("album") and not p_stream.get("album"):
+                p_stream["album"] = existing["album"]
+            if existing.get("bundleId"):
+                p_stream["bundleId"] = existing["bundleId"]
+            if existing.get("artist") and existing.get("artist") != existing.get("title"):
+                p_stream["artist"] = existing["artist"]
 
-    # 4. Check Spotify if running
-    if is_process_running("Spotify"):
-        sp_stream = get_spotify_stream()
-        if sp_stream:
-            if "spotify" in streams_map:
-                existing = streams_map["spotify"]
-                if not sp_stream.get("artwork") and existing.get("artwork"):
-                    sp_stream["artwork"] = existing["artwork"]
-                elif sp_stream.get("artwork") and not existing.get("artwork"):
-                    existing["artwork"] = sp_stream["artwork"]
-                streams_map["spotify"] = sp_stream
-                if primary_stream and primary_stream.get("id") == "spotify":
-                    primary_stream["elapsed"] = sp_stream["elapsed"]
-                    primary_stream["duration"] = sp_stream["duration"]
-                    primary_stream["rate"] = sp_stream["rate"]
-                    if sp_stream.get("artwork"):
-                        primary_stream["artwork"] = sp_stream["artwork"]
+            if primary_stream and primary_stream.get("id") == pid:
+                # Primary MediaRemote stream has the freshest play/pause & elapsed interpolation;
+                # enrich it with rating/artwork/duration from background player poll if available.
+                if p_stream.get("rating") is not None:
+                    primary_stream["rating"] = p_stream["rating"]
+                if p_stream.get("artwork") and not primary_stream.get("artwork"):
+                    primary_stream["artwork"] = p_stream["artwork"]
+                if p_stream.get("duration") and not primary_stream.get("duration"):
+                    primary_stream["duration"] = p_stream["duration"]
             else:
-                streams_map["spotify"] = sp_stream
-
+                streams_map[pid] = p_stream
+        else:
+            b_id = p_stream.get("bundleId", "")
+            app_n = p_stream.get("appName", "")
+            if is_app_running(b_id, app_n):
+                streams_map[pid] = p_stream
 
     # Filter out dead streams
     active_streams = []
     for s_id, s in streams_map.items():
         if not s.get("title") or s.get("title") == "null":
             continue
-        # Generic browser streams (Firefox, Chrome, Safari) must be the current primary MediaRemote stream.
-        # If the user closed the tab or MediaRemote switched away, discard immediately.
         if not is_dedicated_music_app(s):
             if not (primary_stream and primary_stream.get("id") == s_id):
                 continue
+        # Refresh cached artwork reference in case background worker finished fetching square cover art
+        if not s.get("artwork") or not s["artwork"].startswith("nowplaying.widget/.cache/art_off_"):
+            art_url = process_artwork(None, f"{s.get('title','')}___{s.get('artist','')}___{s.get('album','')}", s.get("artist", ""), s.get("title", ""), s.get("bundleId", ""), s.get("appName", ""))
+            if art_url:
+                s["artwork"] = art_url
         active_streams.append(s)
 
-    # Sort: actively playing first, slight bias for actual music apps, then recency
     active_streams.sort(key=stream_sort_key, reverse=True)
 
-    # Attach authentic macOS application icons
     for s in active_streams:
         s["appIcon"] = get_app_icon(s.get("bundleId", ""), s.get("appName", ""))
 
-    # Save cache
     try:
         with open(CACHE_STREAMS_FILE, "w") as f:
             json.dump(active_streams, f)
